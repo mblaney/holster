@@ -1,0 +1,31 @@
+{
+  "name": "holster",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test",
+    "build": "webpack"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "browser-or-node": "^3.0.0",
+    "fs": "^0.0.1-security",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "webpack": "^5.97.1",
+    "webpack-cli": "^6.0.1"
+  },
+  "prettier": {
+    "semi": false,
+    "bracketSpacing": false,
+    "arrowParens": "avoid"
+  },
+  "browser": {
+    "fs": false
+  }
+}
