@@ -1,7 +1,7 @@
 +0#"ASDF.
-+1#"boss="[{"#":"FDSA"},2]
-+1#"name="["Mark Nadal",2]
-+0#"FDSA.color="["ginger",3]
-+0#"FDSA.name="["Fluffy",2]
-+0#"FDSA.slave="[{"#":"ASDF"},2]
-+0#"FDSA.species="["felis silvestris",2]
++1#"boss=#FDSA2
++1#"name="Mark Nadal2
++0#"FDSA.color="ginger3
++0#"FDSA.name="Fluffy2
++0#"FDSA.slave=#ASDF2
++0#"FDSA.species="felis silvestris2

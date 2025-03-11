@@ -5,61 +5,61 @@ const num = {
 }
 
 const obj = {
-  is: obj => {
-    if (!obj) return false
+  is: o => {
+    if (!o) return false
 
     return (
-      (obj instanceof Object && obj.constructor === Object) ||
-      Object.prototype.toString.call(obj).match(/^\[object (\w+)\]$/)[1] ===
+      (o instanceof Object && o.constructor === Object) ||
+      Object.prototype.toString.call(o).match(/^\[object (\w+)\]$/)[1] ===
         "Object"
     )
   },
-  map: (list, cb, obj) => {
+  map: (list, cb, o) => {
     var keys = Object.keys(list)
     for (let i = 0; i < keys.length; i++) {
-      let result = cb(list[keys[i]], keys[i], obj)
+      let result = cb(list[keys[i]], keys[i], o)
       if (typeof result !== "undefined") return result
     }
   },
-  put: (obj, key, value) => {
-    if (!obj) obj = {}
-    obj[key] = value
-    return obj
+  put: (o, key, value) => {
+    if (!o) o = {}
+    o[key] = value
+    return o
   },
-  del: (obj, key) => {
-    if (!obj) return
+  del: (o, key) => {
+    if (!o) return
 
-    obj[key] = null
-    delete obj[key]
-    return obj
+    o[key] = null
+    delete o[key]
+    return o
   },
 }
 
-const map_soul = (soul, key, obj) => {
+const map_soul = (soul, key, o) => {
   // If id is already defined AND we're still looping through the object,
   // then it is considered invalid.
-  if (obj.id) {
-    obj.id = false
+  if (o.id) {
+    o.id = false
     return
   }
 
   if (key === "#" && typeof soul === "string") {
-    obj.id = soul
+    o.id = soul
     return
   }
 
   // If there exists anything else on the object that isn't the soul,
   // then it is considered invalid.
-  obj.id = false
+  o.id = false
 }
 
 // Check if an object is a soul relation, ie {'#': 'UUID'}
 const rel = {
   is: value => {
-    if (value && value["#"] && !value._ && obj_is(value)) {
-      let obj = {}
-      obj.map(value, map_soul, obj)
-      if (obj.id) return o.id
+    if (value && value["#"] && !value._ && obj.is(value)) {
+      let o = {}
+      obj.map(value, map_soul, o)
+      if (o.id) return o.id
     }
 
     return false

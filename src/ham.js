@@ -1,26 +1,22 @@
 // state and value are the incoming changes.
 // currentState and currentValue are the current graph data.
 const Ham = (state, currentState, value, currentValue) => {
-  if (state < currentState) {
-    return {historical: true}
-  }
+  if (state < currentState) return {historical: true}
 
-  if (state > currentState) {
-    return {incoming: true}
-  }
+  if (state > currentState) return {incoming: true}
 
   // state is equal to currentState, lexically compare to resolve conflict.
-  value = JSON.stringify(value) || ""
-  currentValue = JSON.stringify(currentValue) || ""
-  // No update required.
-  if (value === currentValue) {
-    return {state: true}
+  if (typeof value !== "string") {
+    value = JSON.stringify(value) || ""
   }
+  if (typeof currentValue !== "string") {
+    currentValue = JSON.stringify(currentValue) || ""
+  }
+  // No update required.
+  if (value === currentValue) return {state: true}
 
   // Keep the current value.
-  if (value < currentValue) {
-    return {current: true}
-  }
+  if (value < currentValue) return {current: true}
 
   // Otherwise update using the incoming value.
   return {incoming: true}

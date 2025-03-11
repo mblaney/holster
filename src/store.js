@@ -37,8 +37,8 @@ const fileSystem = dir => {
         })
       },
       list: cb => {
-        fs.readdir(dir, (err, dir) => {
-          dir.forEach(cb)
+        fs.readdir(dir, (err, files) => {
+          files.forEach(cb)
           cb()
         })
       },
@@ -70,10 +70,9 @@ const Store = opt => {
       var key = lex["."] || ""
       var node
       const each = (value, key) => {
-        var data = JSON.parse(value)
         if (!node) node = {_: {"#": soul, ">": {}}}
-        node[key] = data[0]
-        node._[">"][key] = data[1]
+        node[key] = value[0]
+        node._[">"][key] = value[1]
       }
 
       radisk(soul + "." + key, (err, value) => {
@@ -115,7 +114,7 @@ const Store = opt => {
           count++
           let value = node[key]
           let state = node._[">"][key]
-          radisk(soul + "." + key, JSON.stringify([value, state]), ack)
+          radisk(soul + "." + key, [value, state], ack)
         })
       })
     },

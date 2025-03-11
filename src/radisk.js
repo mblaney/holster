@@ -3,6 +3,8 @@ const utils = require("./utils")
 
 // ASCII character for unit separator.
 const unit = String.fromCharCode(31)
+// ASCII character for end of text.
+const etx = String.fromCharCode(3)
 
 const Radisk = opt => {
   var u
@@ -181,6 +183,9 @@ const Radisk = opt => {
       count: 0,
       file: file,
       each: (value, key, k, pre) => {
+        // Remove values that have been set to null from the file.
+        if (value === null) return
+
         write.count++
         var enc =
           Radisk.encode(pre.length) +
@@ -217,6 +222,10 @@ const Radisk = opt => {
           } else {
             write.file = key.substring(0, end)
           }
+          // write.limit can be reached after already writing properties of
+          // the current node, so remove it from write.sub before writing to
+          // disk so that it's not duplicated across files.
+          write.sub(write.file, null)
           write.count = 0
           radisk.write(name, write.sub, write.next)
           return true
@@ -244,24 +253,29 @@ const Radisk = opt => {
       let value = cache(key)
       if (typeof value !== "undefined") return cb(u, value)
     }
+    // Only the soul of the key is compared to filenames (see radisk.write).
+    let soul = key
+    let end = key.indexOf(".")
+    if (end !== -1) {
+      soul = key.substring(0, end)
+    }
 
     const read = {
       lex: file => {
-        // store.list should call lex without a file last, which means no
-        // file was found that was greater than key. That means the current
-        // read.file is the right place to read the key.
-        if (!file || file > key) {
+        // store.list should call lex without a file last, which means all file
+        // names were compared to soul, so the current read.file is ok to use.
+        if (!file) {
           if (!read.file) {
             cb("no file found", u)
             return
           }
 
-          if (read.ing) return
-
-          read.ing = true
           radisk.parse(read.file, read.it)
           return
         }
+
+        // Want the filename closest to soul.
+        if (file > soul || file < read.file) return
 
         read.file = file
       },
@@ -293,6 +307,9 @@ const Radisk = opt => {
         if (!data) return cb(u, parse.disk)
 
         let pre = []
+        // Work though data by splitting into 3 values. The first value says
+        // if the second value is one of: the radix level for a key, the key
+        // iteself, or a value. The third is the rest of the data to work with.
         let tmp = parse.split(data)
         while (tmp) {
           let key
@@ -339,27 +356,34 @@ const Radisk = opt => {
 }
 
 Radisk.encode = data => {
-  if (typeof data == "string") {
+  // A key should be passed in as a string to encode, a value can optionally be
+  // an array of 2 items to include the value's state, as is done by store.js.
+  let state = ""
+  if (data instanceof Array && data.length === 2) {
+    state = etx + data[1]
+    data = data[0]
+  }
+
+  if (typeof data === "string") {
     let i = 0
     let current = null
     let text = unit
     while ((current = data[i++])) {
       if (current === unit) text += unit
     }
-    return text + '"' + data + unit
+    return text + '"' + data + state + unit
   }
 
   let tmp = null
-  if (data && data["#"] && (tmp = utils.rel.is(data)))
-    return unit + "#" + tmp + unit
+  if ((tmp = utils.rel.is(data))) {
+    return unit + "#" + tmp + state + unit
+  }
 
-  if (utils.num.is(data)) return unit + "+" + (data || 0) + unit
+  if (utils.num.is(data)) return unit + "+" + (data || 0) + state + unit
 
-  if (data === null) return unit + " " + unit
+  if (data === true) return unit + "+" + state + unit
 
-  if (data === true) return unit + "+" + unit
-
-  if (data === false) return unit + "-" + unit
+  if (data === false) return unit + "-" + state + unit
 }
 
 Radisk.decode = (data, obj) => {
@@ -387,19 +411,34 @@ Radisk.decode = (data, obj) => {
 
   if (obj) obj.i = i + 1
 
-  if (previous === '"') return text
+  let [value, state] = text.split(etx)
+  if (!state) {
+    if (previous === '"') return text
 
-  if (previous === "#") return utils.rel.ify(text)
+    if (previous === "#") return utils.rel.ify(text)
 
-  if (previous === "+") {
-    if (text.length === 0) return true
+    if (previous === "+") {
+      if (text.length === 0) return true
 
-    return parseFloat(text)
+      return parseFloat(text)
+    }
+
+    if (previous === "-") return false
+  } else {
+    state = parseFloat(state)
+    // If state was found then return an array.
+    if (previous === '"') return [value, state]
+
+    if (previous === "#") return [utils.rel.ify(value), state]
+
+    if (previous === "+") {
+      if (value.length === 0) return [true, state]
+
+      return [parseFloat(value), state]
+    }
+
+    if (previous === "-") return [false, state]
   }
-
-  if (previous === " ") return null
-
-  if (previous === "-") return false
 }
 
 module.exports = Radisk

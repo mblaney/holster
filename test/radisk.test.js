@@ -49,6 +49,56 @@ describe("radisk", () => {
     }, opt.wait + 1)
   })
 
+  test("write and read value with state", (t, done) => {
+    radisk("key", ["value", 1234])
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!": '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\x031234\x1F\n',
+      })
+      done()
+    }, 10)
+  })
+
+  test("write and read a plain object is undefined", (t, done) => {
+    radisk("key", {object: true})
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!": '\x1F+0\x1F#\x1F"key\x1F=undefined\n',
+      })
+      done()
+    }, 10)
+  })
+
+  test("write and read object with state is also undefined", (t, done) => {
+    radisk("key", [{object: true}, 1234])
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!": '\x1F+0\x1F#\x1F"key\x1F=undefined\n',
+      })
+      done()
+    }, 10)
+  })
+
+  test("write and read a soul relation is ok", (t, done) => {
+    radisk("key", {"#": "soul"})
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!": '\x1F+0\x1F#\x1F"key\x1F=\x1F#soul\x1F\n',
+      })
+      done()
+    }, 10)
+  })
+
+  test("write and read a soul relation with state is ok", (t, done) => {
+    radisk("key", [{"#": "soul"}, 1234])
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!": '\x1F+0\x1F#\x1F"key\x1F=\x1F#soul\x031234\x1F\n',
+      })
+      done()
+    }, 10)
+  })
+
   test("write and read more than batch size", (t, done) => {
     radisk("keyA", "valueA")
     radisk("keyB", "valueB")
@@ -56,7 +106,7 @@ describe("radisk", () => {
     setTimeout(() => {
       assert.deepEqual(puts, {
         "!":
-          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\x1F\n' +
+          '\x1F+0\x1F#\x1F"key\x1F=\x1F#soul\x031234\x1F\n' +
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
           '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
           '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
@@ -75,7 +125,7 @@ describe("radisk", () => {
     setTimeout(() => {
       assert.deepEqual(puts, {
         "!":
-          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\x1F\n' +
+          '\x1F+0\x1F#\x1F"key\x1F=\x1F#soul\x031234\x1F\n' +
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
           '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
         keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
