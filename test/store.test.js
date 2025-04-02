@@ -73,9 +73,8 @@ describe("store", () => {
           value: newFileValue,
         },
       },
-      (err, value) => {
+      err => {
         assert.equal(err, null)
-        assert.equal(value, 1)
         fs.access("test/multiple/keyC", err => {
           assert.equal(err, null)
           fs.access("test/multiple/newFile", err => {
@@ -194,9 +193,8 @@ describe("store", () => {
           value: "ok got _",
         },
       },
-      (err, value) => {
+      err => {
         assert.equal(err, null)
-        assert.equal(value, 1)
         fs.access("test/special/!", err => {
           assert.equal(err, null)
           done()
@@ -232,10 +230,18 @@ describe("store", () => {
         },
       })
     })
-    // Can write but not read back here? Don't allow as soul name anyway.
     special.get({"#": ".", ".": "value"}, (err, value) => {
-      let u
-      assert.equal(value, u)
+      assert.deepEqual(value, {
+        ".": {
+          _: {
+            "#": ".",
+            ">": {
+              value: 1,
+            },
+          },
+          value: "ok got .",
+        },
+      })
     })
     special.get({"#": "+"}, (err, value) => {
       assert.deepEqual(value, {

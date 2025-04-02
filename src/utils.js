@@ -68,4 +68,16 @@ const rel = {
   ify: soul => obj.put({}, "#", soul),
 }
 
-module.exports = {num, obj, rel}
+const text = {
+  random: length => {
+    var s = ""
+    const c = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXZabcdefghijklmnopqrstuvwxyz"
+    if (!length) length = 24
+    for (let i = 0; i < length; i++) {
+      s += c.charAt(Math.floor(Math.random() * c.length))
+    }
+    return s
+  },
+}
+
+module.exports = {num, obj, rel, text}

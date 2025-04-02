@@ -127,8 +127,11 @@ describe("radisk", () => {
         "!":
           '\x1F+0\x1F#\x1F"key\x1F=\x1F#soul\x031234\x1F\n' +
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
-          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
-        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
+          '\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n',
+        keyC:
+          '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n' +
+          '\x1F+0\x1F#\x1F"newFile\x1F=\x1F \x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"' + value + "\x1F\n",
       })
       done()

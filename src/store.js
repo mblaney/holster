@@ -3,10 +3,23 @@ const Radisk = require("./radisk")
 const Radix = require("./radix")
 const utils = require("./utils")
 
+// ASCII character for enquiry.
+const enq = String.fromCharCode(5)
+// ASCII character for unit separator.
+const unit = String.fromCharCode(31)
+
 const fileSystem = dir => {
   if (jsEnv.isNode) {
     const fs = require("fs")
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir)
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir)
+    }
+    if (!fs.existsSync(dir + "/!")) {
+      fs.writeFileSync(
+        dir + "/!",
+        unit + "+0" + unit + "#" + unit + '"root' + unit,
+      )
+    }
 
     return {
       get: (file, cb) => {
@@ -17,7 +30,7 @@ const fileSystem = dir => {
               return
             }
 
-            console.log("ERROR:", err)
+            console.log("filesystem error:", err)
           }
           if (data) data = data.toString()
           cb(err, data)
@@ -27,7 +40,7 @@ const fileSystem = dir => {
         var random = Math.random().toString(36).slice(-9)
         // Don't put tmp files under dir so that they're not listed.
         var tmp = file + "." + random + ".tmp"
-        fs.writeFile(tmp, data, (err, ok) => {
+        fs.writeFile(tmp, data, err => {
           if (err) {
             cb(err)
             return
@@ -47,12 +60,20 @@ const fileSystem = dir => {
 
   // TODO: Add indexedDB
   return {
-    get: (file, cb) => cb(),
-    put: (file, data, cb) => cb(),
-    list: cb => cb(),
+    get: (file, cb) => {
+      cb(null, unit + "+0" + unit + "#" + unit + '"root' + unit)
+    },
+    put: (file, data, cb) => {
+      cb(null)
+    },
+    list: cb => {
+      cb("!")
+      cb()
+    },
   }
 }
 
+// Store provides get and put methods that can access radisk.
 const Store = opt => {
   if (!utils.obj.is(opt)) opt = {}
   opt.file = String(opt.file || "radata")
@@ -75,11 +96,14 @@ const Store = opt => {
         node._[">"][key] = value[1]
       }
 
-      radisk(soul + "." + key, (err, value) => {
+      radisk(soul + enq + key, (err, value) => {
         let graph
-        if (value) {
+        if (utils.obj.is(value)) {
           Radix.map(value, each)
           if (!node) each(value, key)
+          graph = {[soul]: node}
+        } else if (value) {
+          each(value, key)
           graph = {[soul]: node}
         }
         cb(err, graph)
@@ -92,29 +116,28 @@ const Store = opt => {
       }
 
       var count = 0
-      const ack = (err, ok) => {
+      const ack = err => {
         count--
         if (ack.err) return
 
-        if ((ack.err = err)) {
-          cb(err || "ERROR!")
+        ack.err = err
+        if (ack.err) {
+          cb(ack.err)
           return
         }
 
-        if (count > 0) return
-
-        cb(ack.err, 1)
+        if (count === 0) cb(null)
       }
 
       Object.keys(graph).forEach(soul => {
         var node = graph[soul]
         Object.keys(node).forEach(key => {
-          if ("_" === key) return
+          if (key === "_") return
 
           count++
           let value = node[key]
           let state = node._[">"][key]
-          radisk(soul + "." + key, [value, state], ack)
+          radisk(soul + enq + key, [value, state], ack)
         })
       })
     },

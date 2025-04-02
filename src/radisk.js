@@ -1,11 +1,15 @@
 const Radix = require("./radix")
 const utils = require("./utils")
 
-// ASCII character for unit separator.
-const unit = String.fromCharCode(31)
 // ASCII character for end of text.
 const etx = String.fromCharCode(3)
+// ASCII character for enquiry.
+const enq = String.fromCharCode(5)
+// ASCII character for unit separator.
+const unit = String.fromCharCode(31)
 
+// Radisk provides access to a radix tree that is stored in the provided
+// opt.store interface.
 const Radisk = opt => {
   var u
   var cache = null
@@ -15,7 +19,6 @@ const Radisk = opt => {
   if (!opt.batch) opt.batch = 10 * 1000
   if (!opt.wait) opt.wait = 1
   if (!opt.size) opt.size = 1024 * 1024 // 1MB
-  if (!opt.code) opt.code = "!" // The first printable character
   if (!opt.store) {
     opt.log(
       "Radisk needs `store` interface with `{get: fn, put: fn, list: fn}`",
@@ -35,14 +38,12 @@ const Radisk = opt => {
     return
   }
 
-  /*
-		Any and all storage adapters should...
-		1. Because writing to disk takes time, we should batch data to disk.
-       This improves performance, and reduces potential disk corruption.
-		2. If a batch exceeds a certain number of writes, we should immediately
-       write to disk when physically possible. This caps total performance,
-       but reduces potential loss.
-	*/
+  // Any and all storage adapters should:
+  // 1. Because writing to disk takes time, we should batch data to disk.
+  //    This improves performance, and reduces potential disk corruption.
+  // 2. If a batch exceeds a certain number of writes, we should immediately
+  //    write to disk when physically possible. This caps total performance,
+  //    but reduces potential loss.
   const radisk = (key, value, cb) => {
     key = "" + key
 
@@ -98,29 +99,27 @@ const Radisk = opt => {
     radisk.batch.acks = []
     radisk.batch.ed = 0
     let i = 0
-    radisk.save(batch, (err, ok) => {
+    radisk.save(batch, err => {
       // This is to ignore multiple callbacks from radisk.save calling
       // radisk.write? It looks like multiple callbacks will be made if a
       // file needs to be split.
       if (++i > 1) return
 
       if (err) opt.log(err)
-      batch.acks.forEach(cb => cb(err, ok))
+      batch.acks.forEach(cb => cb(err))
       radisk.thrash.at = null
       radisk.thrash.ing = false
       if (radisk.thrash.more) radisk.thrash()
     })
   }
 
-  /*
-		1. Find the first radix item in memory
-		2. Use that as the starting index in the directory of files
-		3. Find the first file that is lexically larger than it
-		4. Read the previous file into memory
-		5. Scan through in memory radix for all values lexically less than the limit
-		6. Merge and write all of those to the in-memory file and back to disk
-		7. If file is to large then split. More details needed here
-	*/
+  // 1. Find the first radix item in memory
+  // 2. Use that as the starting index in the directory of files
+  // 3. Find the first file that is lexically larger than it
+  // 4. Read the previous file into memory
+  // 5. Scan through in memory radix for all values lexically less than limit
+  // 6. Merge and write all of those to the in-memory file and back to disk
+  // 7. If file is to large then split. More details needed here
   radisk.save = (rad, cb) => {
     const save = {
       find: (tree, key) => {
@@ -134,7 +133,9 @@ const Radisk = opt => {
       lex: file => {
         if (!file || file > save.start) {
           save.end = file
-          save.mix(save.file || opt.code, save.start, save.end)
+          // ! is used as the first file name as it's the first printable
+          // character, so always matches as lexically less than any node.
+          save.mix(save.file || "!", save.start, save.end)
           return true
         }
 
@@ -158,23 +159,17 @@ const Radisk = opt => {
           radisk.write(file, disk, save.next)
         })
       },
-      next: (err, ok) => {
+      next: err => {
         if (err) return cb(err)
 
         if (save.start) return Radix.map(rad, save.find)
 
-        cb(err, ok)
+        cb(err)
       },
     }
     Radix.map(rad, save.find)
   }
 
-  /*
-		Any storage engine at some point will have to do a read in order to write.
-		This is true of even systems that use an append only log, if they support
-    updates. Therefore it is unavoidable that a read will have to happen, the
-		question is just how long you delay it.
-	*/
   radisk.write = (file, rad, cb) => {
     // Invalidate cache on write.
     cache = null
@@ -183,9 +178,6 @@ const Radisk = opt => {
       count: 0,
       file: file,
       each: (value, key, k, pre) => {
-        // Remove values that have been set to null from the file.
-        if (value === null) return
-
         write.count++
         var enc =
           Radisk.encode(pre.length) +
@@ -216,7 +208,7 @@ const Radisk = opt => {
           var name = write.file
           // Use only the soul of the key as the filename so that all
           // properties of a soul are written to the same file.
-          let end = key.indexOf(".")
+          let end = key.indexOf(enq)
           if (end === -1) {
             write.file = key
           } else {
@@ -255,7 +247,7 @@ const Radisk = opt => {
     }
     // Only the soul of the key is compared to filenames (see radisk.write).
     let soul = key
-    let end = key.indexOf(".")
+    let end = key.indexOf(enq)
     if (end !== -1) {
       soul = key.substring(0, end)
     }
@@ -291,13 +283,11 @@ const Radisk = opt => {
     opt.store.list(read.lex)
   }
 
-  /*
-		Let us start by assuming we are the only process that is
-		changing the directory or bucket. Not because we do not want
-		to be multi-process/machine, but because we want to experiment
-		with how much performance and scale we can get out of only one.
-		Then we can work on the harder problem of being multi-process.
-	*/
+  // Let us start by assuming we are the only process that is
+  // changing the directory or bucket. Not because we do not want
+  // to be multi-process/machine, but because we want to experiment
+  // with how much performance and scale we can get out of only one.
+  // Then we can work on the harder problem of being multi-process.
   radisk.parse = (file, cb) => {
     const parse = {
       disk: Radix(),
@@ -374,16 +364,16 @@ Radisk.encode = data => {
     return text + '"' + data + state + unit
   }
 
-  let tmp = null
-  if ((tmp = utils.rel.is(data))) {
-    return unit + "#" + tmp + state + unit
-  }
+  const rel = utils.rel.is(data)
+  if (rel) return unit + "#" + rel + state + unit
 
   if (utils.num.is(data)) return unit + "+" + (data || 0) + state + unit
 
   if (data === true) return unit + "+" + state + unit
 
   if (data === false) return unit + "-" + state + unit
+
+  if (data === null) return unit + " " + state + unit
 }
 
 Radisk.decode = (data, obj) => {
@@ -424,6 +414,8 @@ Radisk.decode = (data, obj) => {
     }
 
     if (previous === "-") return false
+
+    if (previous === " ") return null
   } else {
     state = parseFloat(state)
     // If state was found then return an array.
@@ -438,6 +430,8 @@ Radisk.decode = (data, obj) => {
     }
 
     if (previous === "-") return [false, state]
+
+    if (previous === " ") return [null, state]
   }
 }
 

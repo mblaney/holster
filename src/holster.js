@@ -1,166 +1,262 @@
-const jsEnv = require("browser-or-node")
-const Dup = require("./dup")
-const Get = require("./get")
-const Ham = require("./ham")
-const Store = require("./store")
+const utils = require("./utils")
+const Wire = require("./wire")
 
 const Holster = opt => {
-  const dup = Dup()
-  const store = Store(opt)
-  var graph = {}
-  var queue = {}
+  const wire = Wire(opt)
 
-  const get = (msg, send) => {
-    const ack = Get(msg.get, graph)
-    if (ack) {
-      send(
-        JSON.stringify({
-          "#": dup.track(Dup.random()),
-          "@": msg["#"],
-          put: ack,
-        }),
-      )
-    } else {
-      store.get(msg.get, (err, ack) => {
-        send(
-          JSON.stringify({
-            "#": dup.track(Dup.random()),
-            "@": msg["#"],
-            put: ack,
-            err: err,
-          }),
-        )
-      })
-    }
+  const ok = data => {
+    return (
+      data === null ||
+      data === true ||
+      data === false ||
+      typeof data === "string" ||
+      utils.rel.is(data) ||
+      utils.num.is(data)
+    )
   }
 
-  const put = (msg, send) => {
-    // Store updates returned from Ham.mix and defer updates if required.
-    const update = Ham.mix(msg.put, graph)
-    store.put(update.now, (err, ok) => {
-      send(
-        JSON.stringify({
-          "#": dup.track(Dup.random()),
-          "@": msg["#"],
-          err: err,
-          ok: ok,
-        }),
-      )
-    })
-    if (update.wait !== 0) {
-      setTimeout(() => put(update.defer, send), update.wait)
-    }
-  }
+  // check returns true if data is ok to add to a graph, an error string if
+  // the data can't be converted, and the keys on the data object otherwise.
+  const check = data => {
+    if (ok(data)) return true
 
-  const api = send => {
-    return {
-      get: (lex, cb) => {
-        const ack = Get(lex, graph)
-        if (ack) {
-          cb(null, ack)
-          return
+    if (utils.obj.is(data)) {
+      const keys = []
+      for (const [key, value] of Object.entries(data)) {
+        if (key === "_") {
+          return "error underscore cannot be used as an item name"
         }
+        if (utils.obj.is(value) || ok(value)) {
+          keys.push(key)
+          continue
+        }
+        return `error {${key}:${value}} cannot be converted to graph`
+      }
+      if (keys.length !== 0) return keys
+    }
+    return `error ${data} cannot be converted to a graph`
+  }
 
-        store.get(lex, (err, ack) => {
-          if (ack) {
-            cb(null, ack)
+  // graph converts objects to graph format with updated states.
+  const graph = (soul, data, g) => {
+    if (!g) g = {[soul]: {_: {"#": soul, ">": {}}}}
+    else g[soul] = {_: {"#": soul, ">": {}}}
+
+    for (const [key, value] of Object.entries(data)) {
+      g[soul][key] = value
+      g[soul]._[">"][key] = Date.now()
+    }
+    return g
+  }
+
+  const api = ctx => {
+    api.ctx = ctx
+
+    const resolve = (data, cb) => {
+      const get = typeof data.get !== "undefined"
+      for (let i = 1; i < api.ctx.length; i++) {
+        if (api.ctx[i].soul !== null) continue
+
+        // The current soul in the context chain is null, need the previous
+        // context (ie the parent node) to find a soul relation for it.
+        const {item, soul} = api.ctx[i - 1]
+        wire.get({"#": soul, ".": item}, msg => {
+          if (msg.err) {
+            console.log(`error getting ${item} on ${soul}: ${msg.err}`)
+            cb(null)
             return
           }
 
-          const track = Dup.random()
-          queue[track] = cb
-          send(
-            JSON.stringify({
-              "#": dup.track(track),
-              get: lex,
-            }),
-          )
+          // An earlier callback has already completed the request.
+          if (api.ctx.length === 0) return
+
+          const node = msg.put && msg.put[soul]
+          if (node && node[item] !== "undefined") {
+            const rel = utils.rel.is(node[item])
+            if (rel) {
+              api.ctx[i].soul = rel
+            } else {
+              // Request was not for a node, use the previous context to set
+              // the item as the property on the current soul.
+              api.ctx[i].property = item
+              api.ctx[i].soul = soul
+            }
+            // Call api again using the updated context.
+            if (get) api(api.ctx).get(null, data.get, cb)
+            else api(api.ctx).put(data.put, cb)
+          } else {
+            console.log(`error ${item} not found on ${soul}`)
+            cb(null)
+          }
         })
+        // Callback has been passed to next soul lookup or called above, so
+        // return false as the calling code should not continue.
+        return false
+      }
+
+      if (get && api.ctx[api.ctx.length - 1].item !== null) {
+        // The context has been resolved, but it does not include the node
+        // requested in a get request, this requires one more lookup.
+        api.ctx.push({item: null, soul: null})
+        api(api.ctx).get(null, data.get, cb)
+        return false
+      }
+
+      // Return the last context, ie the soul required by the calling code.
+      return api.ctx[api.ctx.length - 1]
+    }
+
+    // done makes sure the given callback is only called once.
+    const done = data => {
+      // context needs to be cleared in case api is used again.
+      if (api.ctx) api.ctx = []
+      if (api.cb) {
+        // Relase api.cb before calling it so the next chain call can use it.
+        const tmp = api.cb
+        api.cb = null
+        tmp(data)
+        return
+      }
+
+      // Log errors when api.cb is not set.
+      if (data) console.log(data)
+    }
+
+    return {
+      get: (key, lex, cb) => {
+        if (typeof lex === "function") {
+          cb = lex
+          lex = null
+        }
+        if (!api.cb) api.cb = cb
+        if (key === "" || key === "_") {
+          done(null)
+          return api(api.ctx)
+        }
+
+        if (api.ctx && api.ctx.length !== 0) {
+          // Push the key to the context as it needs a soul lookup.
+          // (null is used by resolve to call the api with the updated context)
+          if (key !== null) api.ctx.push({item: key, soul: null})
+        } else {
+          if (key === null) {
+            done(null)
+            return api(api.ctx)
+          }
+
+          // Top level keys are added to a root node so their values don't need
+          // to be objects.
+          api.ctx = [{item: key, soul: "root"}]
+        }
+        if (!api.cb) return api(api.ctx)
+
+        // When there's a callback need to resolve the context first.
+        const {property, soul} = resolve({get: lex}, done)
+        if (!soul) return api(api.ctx)
+
+        wire.get(utils.obj.put(lex, "#", soul), msg => {
+          if (msg.err) console.log(msg.err)
+          if (msg.put && msg.put[soul]) {
+            if (typeof msg.put[soul][property] !== "undefined") {
+              done(msg.put[soul][property])
+            } else {
+              delete msg.put[soul]._
+              done(msg.put[soul])
+            }
+          } else {
+            // No data callback.
+            done(null)
+          }
+        })
+        return api(api.ctx)
       },
       put: (data, cb) => {
-        // Deferred updates are only stored using wire spec, they're ignored
-        // here using the api. This is ok because correct timestamps should be
-        // used whereas wire spec needs to handle clock skew.
-        const update = Ham.mix(data, graph)
-        store.put(update.now, cb)
-        // Also put data on the wire spec.
-        // TODO: Note that this means all clients now receive all updates, so
-        // need to filter what should be stored, both in graph and on disk.
-        send(
-          JSON.stringify({
-            "#": dup.track(Dup.random()),
-            put: data,
-          }),
-        )
+        if (!api.cb) {
+          if (!cb) return
+
+          // This (and ack) allows nested objects to keep their own callbacks.
+          api.cb = cb
+          cb = null
+        }
+
+        const ack = err => {
+          cb ? cb(err) : done(err)
+        }
+
+        if (!api.ctx || api.ctx.length === 0) {
+          ack("please provide a key using get(key) before put")
+          return
+        }
+
+        const result = check(data)
+        if (typeof result === "string") {
+          // All strings returned from check are errors, cannot continue.
+          ack(result)
+          return
+        }
+
+        // Resolve the current context before putting data.
+        const {item, soul} = resolve({put: data}, ack)
+        if (!soul) return
+
+        if (result === true) {
+          // When result is true data is a property to put on the current soul.
+          wire.put(graph(soul, {[item]: data}), ack)
+          return
+        }
+
+        // Otherwise put the data using the keys returned in result.
+        // Need to check if a rel has already been added on the current node.
+        wire.get({"#": soul, ".": item}, async msg => {
+          if (msg.err) {
+            ack(`error getting ${soul}: ${msg.err}`)
+            return
+          }
+
+          const current = msg.put && msg.put[soul] && msg.put[soul][item]
+          const id = utils.rel.is(current)
+          if (!id) {
+            // The current rel doesn't exist, so add it first.
+            const rel = {[item]: utils.rel.ify(utils.text.random())}
+            wire.put(graph(soul, rel), err => {
+              if (err) {
+                ack(`error putting ${item} on ${soul}: ${err}`)
+              } else {
+                api(api.ctx).put(data, ack)
+              }
+            })
+            return
+          }
+
+          let put = false
+          const update = {}
+          for (let i = 0; i < result.length; i++) {
+            const key = result[i]
+            const err = await new Promise(resolve => {
+              if (utils.obj.is(data[key])) {
+                // Use the current rel as the context for nested objects.
+                api([{item: key, soul: id}]).put(data[key], resolve)
+              } else {
+                put = true
+                // Group other properties into one update.
+                update[key] = data[key]
+                resolve(null)
+              }
+            })
+            if (err) {
+              ack(err)
+              return
+            }
+          }
+          if (put) wire.put(graph(id, update), ack)
+          else ack()
+        })
       },
+      // Allow the wire spec to be used via holster.
+      wire: wire,
     }
   }
-
-  if (jsEnv.isNode) {
-    const WebSocket = require("ws")
-    const wss = new WebSocket.Server({port: 8080})
-    const send = (data, isBinary) => {
-      wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(data, {binary: isBinary})
-        }
-      })
-    }
-    wss.on("connection", ws => {
-      ws.on("error", console.error)
-
-      ws.on("message", (data, isBinary) => {
-        const msg = JSON.parse(data)
-        if (dup.check(msg["#"])) return
-
-        dup.track(msg["#"])
-        if (msg.get) get(msg, send)
-        if (msg.put) put(msg, send)
-        send(data, isBinary)
-        if ((cb = queue[msg["@"]])) {
-          cb(null, msg)
-          delete queue[msg["@"]]
-        }
-      })
-    })
-    return api(send)
-  }
-
-  let ws = new WebSocket("ws://localhost:8080")
-  const send = data => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.log("websocket not available")
-      return
-    }
-
-    ws.send(data)
-  }
-  const start = () => {
-    if (!ws) ws = new WebSocket("ws://localhost:8080")
-    ws.onclose = c => {
-      ws = null
-      setTimeout(start, Math.floor(Math.random() * 5000))
-    }
-    ws.onerror = e => {
-      console.error(e)
-    }
-    ws.onmessage = m => {
-      const msg = JSON.parse(m.data)
-      if (dup.check(msg["#"])) return
-
-      dup.track(msg["#"])
-      if (msg.get) get(msg, send)
-      if (msg.put) put(msg, send)
-      if ((cb = queue[msg["@"]])) {
-        cb(null, msg)
-        delete queue[msg["@"]]
-      }
-      send(m.data)
-    }
-  }
-
-  start()
-  return api(send)
+  return api()
 }
 
 module.exports = Holster

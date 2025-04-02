@@ -4,47 +4,41 @@ const holster = Holster()
 // (Restart the server so that graph is not in memory.)
 const readFromDisk = false
 
-if (readFromDisk) {
-  setTimeout(() => {
-    holster.get({"#": "FDSA", ".": "species"}, (err, ack) => {
-      console.log("read from disk:", err, ack)
+// Wait for the websocket to connect.
+setTimeout(() => {
+  if (readFromDisk) {
+    holster.get("mark").get("boss", {".": "species"}, data => {
+      console.log("read from disk:", data)
     })
-  }, 1000)
-} else {
-  // Create two updates that could happen in either order.
-  setTimeout(() => {
+  } else {
     const update1 = {
-      ASDF: {
-        _: {"#": "ASDF", ">": {name: 2, boss: 2}},
-        name: "Mark Nadal",
-        boss: {"#": "FDSA"},
-      },
-      FDSA: {
-        _: {"#": "FDSA", ">": {name: 2, species: 2, slave: 2}},
+      name: "Mark Nadal",
+      boss: {
         name: "Fluffy",
         species: "a kitty",
-        slave: {"#": "ASDF"},
       },
     }
-    holster.put(update1, (err, ok) => console.log("update1:", err, ok))
-  }, 1000 * Math.random())
+    holster.get("mark").put(update1, err => {
+      console.log("update1:", err)
 
-  setTimeout(() => {
-    const update2 = {
-      ASDF: {_: {"#": "ASDF", ">": {name: 1}}, name: "Mark"},
-      FDSA: {
-        _: {"#": "FDSA", ">": {species: 2, color: 3}},
-        species: "felis silvestris",
-        color: "ginger",
-      },
-    }
-    holster.put(update2, (err, ok) => console.log("update2:", err, ok))
-  }, 1000 * Math.random())
+      // Holster API stores the chained key context, so can't use the API
+      // again until the first callback has returned.
+      const update2 = {
+        name: "Mark",
+        boss: {
+          species: "felis silvestris",
+          color: "ginger",
+        },
+      }
+      holster.get("mark").put(update2, err => {
+        console.log("update2:", err)
 
-  // They should always produce the same result no matter which order.
-  setTimeout(() => {
-    holster.get({"#": "FDSA", ".": "species"}, (err, ack) => {
-      console.log("get:", err, ack)
+        // The API sets the state on properties to the current time, so no
+        // conflict resolution available here to test.
+        holster.get("mark").get("boss", {".": "species"}, data => {
+          console.log("get:", data)
+        })
+      })
     })
-  }, 2000)
-}
+  }
+}, 1000)

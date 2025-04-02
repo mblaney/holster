@@ -1,5 +1,6 @@
-const Dup = () => {
-  const maxAge = 9000
+const Dup = maxAge => {
+  // Allow maxAge to be passed in as tests wait on the setTimeout.
+  if (!maxAge) maxAge = 9000
   const dup = {store: {}}
   dup.check = id => (dup.store[id] ? dup.track(id) : false)
   dup.track = id => {
@@ -17,10 +18,6 @@ const Dup = () => {
     return id
   }
   return dup
-}
-
-Dup.random = () => {
-  return Math.random().toString(36).slice(-9)
 }
 
 module.exports = Dup
