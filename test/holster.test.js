@@ -8,22 +8,36 @@ describe("holster", () => {
   const wss = new Server("ws://localhost:1234")
   const holster = Holster({file: "test/holster", wss: wss, maxAge: 100})
 
-  test("empty key callback ok", (t, done) => {
+  test("empty key callback null", (t, done) => {
     holster.get("", data => {
       assert.equal(data, null)
       done()
     })
   })
 
-  test("null key callback ok", (t, done) => {
+  test("null key callback null", (t, done) => {
     holster.get(null, data => {
       assert.equal(data, null)
       done()
     })
   })
 
-  test("underscore as key callback ok", (t, done) => {
+  test("underscore as key callback null", (t, done) => {
     holster.get("_", data => {
+      assert.equal(data, null)
+      done()
+    })
+  })
+
+  test("get unknown key callback null", (t, done) => {
+    holster.get("unknown", data => {
+      assert.equal(data, null)
+      done()
+    })
+  })
+
+  test("get chained unknown keys callback null", (t, done) => {
+    holster.get("chained").get("unknown", data => {
       assert.equal(data, null)
       done()
     })
@@ -84,6 +98,38 @@ describe("holster", () => {
     })
   })
 
+  test("chained get before put", (t, done) => {
+    holster
+      .get("hello")
+      .get("world!")
+      .put("ok", err => {
+        assert.equal(err, null)
+
+        holster.get("hello").get("world!", data => {
+          assert.equal(data, "ok")
+          done()
+        })
+      })
+  })
+
+  test("more chained gets before put", (t, done) => {
+    holster
+      .get("1")
+      .get("2")
+      .get("3")
+      .put("4", err => {
+        assert.equal(err, null)
+
+        holster
+          .get("1")
+          .get("2")
+          .get("3", data => {
+            assert.equal(data, "4")
+            done()
+          })
+      })
+  })
+
   test("put and get object on root in graph format", (t, done) => {
     const plain = {
       key: "plain value",
@@ -114,6 +160,23 @@ describe("holster", () => {
     })
   })
 
+  test("chained get before put object in graph format", (t, done) => {
+    const plain = {
+      key: "hello plain value",
+    }
+    holster
+      .get("hello")
+      .get("plain")
+      .put(plain, err => {
+        assert.equal(err, null)
+
+        holster.get("hello").get("plain", data => {
+          assert.deepEqual(data, plain)
+          done()
+        })
+      })
+  })
+
   test("put and get nested object", (t, done) => {
     const nested = {
       key: "nested value",
@@ -133,6 +196,36 @@ describe("holster", () => {
         })
       })
     })
+  })
+
+  test("chained get before put nested object", (t, done) => {
+    const nested = {
+      key: "hello nested value",
+      child: {
+        has: "hello child value",
+      },
+    }
+    holster
+      .get("hello")
+      .get("nested")
+      .put(nested, err => {
+        assert.equal(err, null)
+
+        holster
+          .get("hello")
+          .get("nested")
+          .get("key", data => {
+            assert.equal(data, "hello nested value")
+
+            holster
+              .get("hello")
+              .get("nested")
+              .get("child", data => {
+                assert.deepEqual(data, {has: "hello child value"})
+                done()
+              })
+          })
+      })
   })
 
   test("put and get two nested objects", (t, done) => {

@@ -52,8 +52,8 @@ const Holster = opt => {
   const api = ctx => {
     api.ctx = ctx
 
-    const resolve = (data, cb) => {
-      const get = typeof data.get !== "undefined"
+    const resolve = (request, cb) => {
+      const get = typeof request.get !== "undefined"
       for (let i = 1; i < api.ctx.length; i++) {
         if (api.ctx[i].soul !== null) continue
 
@@ -72,18 +72,30 @@ const Holster = opt => {
 
           const node = msg.put && msg.put[soul]
           if (node && node[item] !== "undefined") {
-            const rel = utils.rel.is(node[item])
-            if (rel) {
-              api.ctx[i].soul = rel
+            let id = utils.rel.is(node[item])
+            if (id) {
+              api.ctx[i].soul = id
+              // Call api again using the updated context.
+              if (get) api(api.ctx).get(null, request.get, cb)
+              else api(api.ctx).put(request.put, cb)
+            } else if (get) {
+              // Request was not for a node, return a property on the current
+              // soul.
+              cb(node[item])
             } else {
-              // Request was not for a node, use the previous context to set
-              // the item as the property on the current soul.
-              api.ctx[i].property = item
-              api.ctx[i].soul = soul
+              // Request was a chained get before put, so rel don't exist yet.
+              id = utils.text.random()
+              const rel = {[item]: utils.rel.ify(id)}
+              wire.put(graph(soul, rel), err => {
+                if (err) {
+                  ack(`error putting ${item} on ${soul}: ${err}`)
+                  return
+                }
+
+                api.ctx[i].soul = id
+                api(api.ctx).put(request.put, cb)
+              })
             }
-            // Call api again using the updated context.
-            if (get) api(api.ctx).get(null, data.get, cb)
-            else api(api.ctx).put(data.put, cb)
           } else {
             console.log(`error ${item} not found on ${soul}`)
             cb(null)
@@ -98,7 +110,7 @@ const Holster = opt => {
         // The context has been resolved, but it does not include the node
         // requested in a get request, this requires one more lookup.
         api.ctx.push({item: null, soul: null})
-        api(api.ctx).get(null, data.get, cb)
+        api(api.ctx).get(null, request.get, cb)
         return false
       }
 
@@ -151,18 +163,14 @@ const Holster = opt => {
         if (!api.cb) return api(api.ctx)
 
         // When there's a callback need to resolve the context first.
-        const {property, soul} = resolve({get: lex}, done)
+        const {soul} = resolve({get: lex}, done)
         if (!soul) return api(api.ctx)
 
         wire.get(utils.obj.put(lex, "#", soul), msg => {
           if (msg.err) console.log(msg.err)
           if (msg.put && msg.put[soul]) {
-            if (typeof msg.put[soul][property] !== "undefined") {
-              done(msg.put[soul][property])
-            } else {
-              delete msg.put[soul]._
-              done(msg.put[soul])
-            }
+            delete msg.put[soul]._
+            done(msg.put[soul])
           } else {
             // No data callback.
             done(null)
