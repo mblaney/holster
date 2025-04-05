@@ -147,8 +147,6 @@ describe("holster", () => {
     })
   })
 
-  // TODO: Putting null only updates the rel, probably should resolve the
-  // key and remove the node as well.
   test("put object to null on root", (t, done) => {
     holster.get("plain").put(null, err => {
       assert.equal(err, null)

@@ -209,6 +209,41 @@ const Holster = opt => {
 
         if (result === true) {
           // When result is true data is a property to put on the current soul.
+          // If data is null, need to check if item is a rel and also set the
+          // node to null.
+          if (data === null) {
+            wire.get({"#": soul, ".": item}, async msg => {
+              if (msg.err) {
+                console.log(`error getting ${soul}: ${msg.err}`)
+                return
+              }
+
+              const current = msg.put && msg.put[soul] && msg.put[soul][item]
+              const id = utils.rel.is(current)
+              if (id) {
+                wire.get({"#": id}, async msg => {
+                  if (msg.err) {
+                    console.log(`error getting ${id}: ${msg.err}`)
+                    return
+                  }
+
+                  if (!msg.put || !msg.put[id]) {
+                    console.log(`error ${id} not found`)
+                    return
+                  }
+
+                  delete msg.put[id]._
+                  // null each of the properties on the node.
+                  for (const key of Object.keys(msg.put[id])) {
+                    api([{item: key, soul: id}]).put(null, err => {
+                      if (err !== null) console.log(err)
+                    })
+                  }
+                })
+              }
+            })
+          }
+
           wire.put(graph(soul, {[item]: data}), ack)
           return
         }
