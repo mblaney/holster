@@ -140,19 +140,28 @@ const Holster = opt => {
           cb = lex
           lex = null
         }
-        if (!api.cb) api.cb = cb
+        if (cb && !api.cb) {
+          // This (and ack) allows nested objects to keep their own callbacks.
+          api.cb = cb
+          cb = null
+        }
+
+        const ack = err => {
+          cb ? cb(err) : done(err)
+        }
+
         if (key === "" || key === "_") {
-          done(null)
+          ack(null)
           return api(api.ctx)
         }
 
         if (api.ctx && api.ctx.length !== 0) {
           // Push the key to the context as it needs a soul lookup.
-          // (null is used by resolve to call the api with the updated context)
+          // (null is used to call the api with updated context)
           if (key !== null) api.ctx.push({item: key, soul: null})
         } else {
           if (key === null) {
-            done(null)
+            ack(null)
             return api(api.ctx)
           }
 
@@ -163,17 +172,27 @@ const Holster = opt => {
         if (!api.cb) return api(api.ctx)
 
         // When there's a callback need to resolve the context first.
-        const {soul} = resolve({get: lex}, done)
+        const {soul} = resolve({get: lex}, ack)
         if (!soul) return api(api.ctx)
 
-        wire.get(utils.obj.put(lex, "#", soul), msg => {
+        wire.get(utils.obj.put(lex, "#", soul), async msg => {
           if (msg.err) console.log(msg.err)
           if (msg.put && msg.put[soul]) {
             delete msg.put[soul]._
-            done(msg.put[soul])
+            // Resolve any rels on the node before returning to the user.
+            for (const key of Object.keys(msg.put[soul])) {
+              const id = utils.rel.is(msg.put[soul][key])
+              if (id) {
+                const data = await new Promise(resolve => {
+                  api([{item: null, soul: id}]).get(null, resolve)
+                })
+                msg.put[soul][key] = data
+              }
+            }
+            ack(msg.put[soul])
           } else {
             // No data callback.
-            done(null)
+            ack(null)
           }
         })
         return api(api.ctx)
@@ -209,40 +228,38 @@ const Holster = opt => {
 
         if (result === true) {
           // When result is true data is a property to put on the current soul.
-          // If data is null, need to check if item is a rel and also set the
-          // node to null.
-          if (data === null) {
-            wire.get({"#": soul, ".": item}, async msg => {
+          // Need to check if item is a rel and also set the node to null. (This
+          // applies for any update from a rel to a property, not just null.)
+          wire.get({"#": soul, ".": item}, async msg => {
+            if (msg.err) {
+              console.log(`error getting ${soul}: ${msg.err}`)
+              return
+            }
+
+            const current = msg.put && msg.put[soul] && msg.put[soul][item]
+            const id = utils.rel.is(current)
+            if (!id) return
+
+            wire.get({"#": id}, async msg => {
               if (msg.err) {
-                console.log(`error getting ${soul}: ${msg.err}`)
+                console.log(`error getting ${id}: ${msg.err}`)
                 return
               }
 
-              const current = msg.put && msg.put[soul] && msg.put[soul][item]
-              const id = utils.rel.is(current)
-              if (id) {
-                wire.get({"#": id}, async msg => {
-                  if (msg.err) {
-                    console.log(`error getting ${id}: ${msg.err}`)
-                    return
-                  }
+              if (!msg.put || !msg.put[id]) {
+                console.log(`error ${id} not found`)
+                return
+              }
 
-                  if (!msg.put || !msg.put[id]) {
-                    console.log(`error ${id} not found`)
-                    return
-                  }
-
-                  delete msg.put[id]._
-                  // null each of the properties on the node.
-                  for (const key of Object.keys(msg.put[id])) {
-                    api([{item: key, soul: id}]).put(null, err => {
-                      if (err !== null) console.log(err)
-                    })
-                  }
+              delete msg.put[id]._
+              // null each of the properties on the node.
+              for (const key of Object.keys(msg.put[id])) {
+                api([{item: key, soul: id}]).put(null, err => {
+                  if (err !== null) console.log(err)
                 })
               }
             })
-          }
+          })
 
           wire.put(graph(soul, {[item]: data}), ack)
           return
@@ -273,8 +290,7 @@ const Holster = opt => {
 
           let put = false
           const update = {}
-          for (let i = 0; i < result.length; i++) {
-            const key = result[i]
+          for (const key of result) {
             const err = await new Promise(resolve => {
               if (utils.obj.is(data[key])) {
                 // Use the current rel as the context for nested objects.

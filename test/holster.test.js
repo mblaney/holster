@@ -185,14 +185,22 @@ describe("holster", () => {
     holster.get("nested").put(nested, err => {
       assert.equal(err, null)
 
-      holster.get("nested").get("key", data => {
-        assert.equal(data, "nested value")
+      // Getting a nested object requires waiting for radisk to write to disk,
+      // as it will batch the writes. (Default wait is 1 millisecond.)
+      setTimeout(() => {
+        holster.get("nested", data => {
+          assert.deepEqual(data, nested)
 
-        holster.get("nested").get("child", data => {
-          assert.deepEqual(data, {has: "child value"})
-          done()
+          holster.get("nested").get("key", data => {
+            assert.equal(data, "nested value")
+
+            holster.get("nested").get("child", data => {
+              assert.deepEqual(data, {has: "child value"})
+              done()
+            })
+          })
         })
-      })
+      }, 2)
     })
   })
 
@@ -209,20 +217,26 @@ describe("holster", () => {
       .put(nested, err => {
         assert.equal(err, null)
 
-        holster
-          .get("hello")
-          .get("nested")
-          .get("key", data => {
-            assert.equal(data, "hello nested value")
+        setTimeout(() => {
+          holster.get("hello").get("nested", data => {
+            assert.deepEqual(data, nested)
 
             holster
               .get("hello")
               .get("nested")
-              .get("child", data => {
-                assert.deepEqual(data, {has: "hello child value"})
-                done()
+              .get("key", data => {
+                assert.equal(data, "hello nested value")
+
+                holster
+                  .get("hello")
+                  .get("nested")
+                  .get("child", data => {
+                    assert.deepEqual(data, {has: "hello child value"})
+                    done()
+                  })
               })
           })
+        }, 2)
       })
   })
 
@@ -239,14 +253,20 @@ describe("holster", () => {
     holster.get("two").put(two, err => {
       assert.equal(err, null)
 
-      holster.get("two").get("child1", data => {
-        assert.deepEqual(data, {has: "child value 1"})
+      setTimeout(() => {
+        holster.get("two", data => {
+          assert.deepEqual(data, two)
 
-        holster.get("two").get("child2", data => {
-          assert.deepEqual(data, {has: "child value 2"})
-          done()
+          holster.get("two").get("child1", data => {
+            assert.deepEqual(data, {has: "child value 1"})
+
+            holster.get("two").get("child2", data => {
+              assert.deepEqual(data, {has: "child value 2"})
+              done()
+            })
+          })
         })
-      })
+      }, 2)
     })
   })
 
@@ -257,28 +277,34 @@ describe("holster", () => {
         has: "child value",
         grandchild: {
           has: "grandchild value",
-          other: "(not returned)",
+          other: "(not returned in lex query)",
         },
       },
     }
     holster.get("multiple").put(multiple, err => {
       assert.equal(err, null)
 
-      holster.get("multiple").get("child", {".": "has"}, data => {
-        assert.deepEqual(data, {has: "child value"})
+      setTimeout(() => {
+        holster.get("multiple", data => {
+          assert.deepEqual(data, multiple)
 
-        holster
-          .get("multiple")
-          .get("child")
-          .get("grandchild", {".": "has"}, data => {
-            assert.deepEqual(data, {has: "grandchild value"})
+          holster.get("multiple").get("child", {".": "has"}, data => {
+            assert.deepEqual(data, {has: "child value"})
 
-            fs.rm("test/holster", {recursive: true, force: true}, err => {
-              assert.equal(err, null)
-              done()
-            })
+            holster
+              .get("multiple")
+              .get("child")
+              .get("grandchild", {".": "has"}, data => {
+                assert.deepEqual(data, {has: "grandchild value"})
+
+                fs.rm("test/holster", {recursive: true, force: true}, err => {
+                  assert.equal(err, null)
+                  done()
+                })
+              })
           })
-      })
+        })
+      }, 2)
     })
   })
 })
