@@ -17,8 +17,8 @@ const Radisk = opt => {
   if (!opt) opt = {}
   if (!opt.log) opt.log = console.log
   if (!opt.batch) opt.batch = 10 * 1000
-  if (!opt.wait) opt.wait = 1
-  if (!opt.size) opt.size = 1024 * 1024 // 1MB
+  if (!opt.write) opt.write = 1 // Wait time before write in milliseconds.
+  if (!opt.size) opt.size = 1024 * 1024 // File size on disk, default 1MB.
   if (!opt.store) {
     opt.log(
       "Radisk needs `store` interface with `{get: fn, put: fn, list: fn}`",
@@ -78,7 +78,7 @@ const Radisk = opt => {
 
     // Otherwise wait for more updates before writing.
     clearTimeout(radisk.batch.timeout)
-    radisk.batch.timeout = setTimeout(radisk.thrash, opt.wait)
+    radisk.batch.timeout = setTimeout(radisk.thrash, opt.write)
   }
 
   radisk.batch = Radix()

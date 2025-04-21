@@ -5,6 +5,9 @@ const Ham = require("./ham")
 const Store = require("./store")
 const utils = require("./utils")
 
+// ASCII character for enquiry.
+const enq = String.fromCharCode(5)
+
 // Wire starts a websocket client or server and returns get and put methods
 // for access to the wire spec and storage.
 const Wire = opt => {
@@ -12,8 +15,9 @@ const Wire = opt => {
 
   const dup = Dup(opt.maxAge)
   const store = Store(opt)
-  var graph = {}
-  var queue = {}
+  const graph = {}
+  const queue = {}
+  const listen = {}
 
   const get = (msg, send) => {
     const ack = Get(msg.get, graph)
@@ -41,7 +45,7 @@ const Wire = opt => {
 
   const put = (msg, send) => {
     // Store updates returned from Ham.mix and defer updates if required.
-    const update = Ham.mix(msg.put, graph)
+    const update = Ham.mix(msg.put, graph, listen)
     store.put(update.now, err => {
       send(
         JSON.stringify({
@@ -101,7 +105,7 @@ const Wire = opt => {
         // Deferred updates are only stored using wire spec, they're ignored
         // here using the api. This is ok because correct timestamps should be
         // used whereas wire spec needs to handle clock skew.
-        const update = Ham.mix(data, graph)
+        const update = Ham.mix(data, graph, listen)
         store.put(update.now, cb)
         // Also put data on the wire spec.
         // TODO: Note that this means all clients now receive all updates, so
@@ -112,6 +116,35 @@ const Wire = opt => {
             put: data,
           }),
         )
+      },
+      on: (lex, cb) => {
+        if (!cb) return
+
+        let id = lex["#"]
+        if (!id) return
+
+        if (lex["."]) id += enq + lex["."]
+        if (listen[id]) {
+          if (!listen[id].includes(cb)) listen[id].push(cb)
+        } else {
+          listen[id] = [cb]
+        }
+      },
+      off: (lex, cb) => {
+        let id = lex["#"]
+        if (!id) return
+
+        if (lex["."]) id += enq + lex["."]
+        if (!listen[id]) return
+
+        if (cb) {
+          if (listen[id].includes(cb)) {
+            listen[id].splice(listen[id].indexOf(cb), 1)
+          }
+        } else {
+          // Remove all callbacks when none provided.
+          delete listen[id]
+        }
       },
     }
   }

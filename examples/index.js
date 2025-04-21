@@ -7,7 +7,7 @@ const readFromDisk = false
 // Wait for the websocket to connect.
 setTimeout(() => {
   if (readFromDisk) {
-    holster.get("mark").get("boss", {".": "species"}, data => {
+    holster.get("mark").then("boss", {".": "species"}, data => {
       console.log("read from disk:", data)
     })
   } else {
@@ -35,7 +35,7 @@ setTimeout(() => {
 
         // The API sets the state on properties to the current time, so no
         // conflict resolution available here to test.
-        holster.get("mark").get("boss", {".": "species"}, data => {
+        holster.get("mark").then("boss", {".": "species"}, data => {
           console.log("get:", data)
         })
       })

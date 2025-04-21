@@ -1,3 +1,6 @@
+// ASCII character for enquiry.
+const enq = String.fromCharCode(5)
+
 // state and value are the incoming changes.
 // currentState and currentValue are the current graph data.
 const Ham = (state, currentState, value, currentValue) => {
@@ -22,14 +25,15 @@ const Ham = (state, currentState, value, currentValue) => {
   return {incoming: true}
 }
 
-Ham.mix = (change, graph) => {
+Ham.mix = (change, graph, listen) => {
   var machine = Date.now()
-  var update = {}
+  var now = {}
   var defer = {}
   let wait = 0
 
   Object.keys(change).forEach(soul => {
     const node = change[soul]
+    let updated = false
     Object.keys(node).forEach(key => {
       if (key === "_") return
 
@@ -52,18 +56,31 @@ Ham.mix = (change, graph) => {
       } else {
         const result = Ham(state, currentState, value, currentValue)
         if (result.incoming) {
-          if (!update[soul]) update[soul] = {_: {"#": soul, ">": {}}}
+          if (!now[soul]) now[soul] = {_: {"#": soul, ">": {}}}
           // TODO: graph should not just grow indefintitely in memory.
           // Need to have a max size after which start dropping the oldest state
           // Do something similar to Dup which can handle deletes?
           if (!graph[soul]) graph[soul] = {_: {"#": soul, ">": {}}}
-          graph[soul][key] = update[soul][key] = value
-          graph[soul]._[">"][key] = update[soul]._[">"][key] = state
+          graph[soul][key] = now[soul][key] = value
+          graph[soul]._[">"][key] = now[soul]._[">"][key] = state
+          // Call event listeners for update on key, mix is called before
+          // put has finished so wait for what could be multiple nested
+          // updates on a node.
+          setTimeout(() => {
+            const id = soul + enq + key
+            if (listen[id]) listen[id].forEach(cb => cb())
+          }, 100)
+          updated = true
         }
       }
     })
+    // Call event listeners for update on soul.
+    if (updated && listen[soul])
+      setTimeout(() => {
+        listen[soul].forEach(cb => cb())
+      }, 100)
   })
-  return {now: update, defer: defer, wait: wait}
+  return {now: now, defer: defer, wait: wait}
 }
 
 module.exports = Ham

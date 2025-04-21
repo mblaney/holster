@@ -6,42 +6,7 @@ const Holster = require("../src/holster")
 
 describe("holster", () => {
   const wss = new Server("ws://localhost:1234")
-  const holster = Holster({file: "test/holster", wss: wss, maxAge: 100})
-
-  test("empty key callback null", (t, done) => {
-    holster.get("", data => {
-      assert.equal(data, null)
-      done()
-    })
-  })
-
-  test("null key callback null", (t, done) => {
-    holster.get(null, data => {
-      assert.equal(data, null)
-      done()
-    })
-  })
-
-  test("underscore as key callback null", (t, done) => {
-    holster.get("_", data => {
-      assert.equal(data, null)
-      done()
-    })
-  })
-
-  test("get unknown key callback null", (t, done) => {
-    holster.get("unknown", data => {
-      assert.equal(data, null)
-      done()
-    })
-  })
-
-  test("get chained unknown keys callback null", (t, done) => {
-    holster.get("chained").get("unknown", data => {
-      assert.equal(data, null)
-      done()
-    })
-  })
+  const holster = Holster({file: "test/holster.put", wss: wss, maxAge: 100})
 
   test("put and get string on root", (t, done) => {
     holster.get("key").put("value", err => {
@@ -101,11 +66,11 @@ describe("holster", () => {
   test("chained get before put", (t, done) => {
     holster
       .get("hello")
-      .get("world!")
+      .then("world!")
       .put("ok", err => {
         assert.equal(err, null)
 
-        holster.get("hello").get("world!", data => {
+        holster.get("hello").then("world!", data => {
           assert.equal(data, "ok")
           done()
         })
@@ -115,15 +80,15 @@ describe("holster", () => {
   test("more chained gets before put", (t, done) => {
     holster
       .get("1")
-      .get("2")
-      .get("3")
+      .then("2")
+      .then("3")
       .put("4", err => {
         assert.equal(err, null)
 
         holster
           .get("1")
-          .get("2")
-          .get("3", data => {
+          .then("2")
+          .then("3", data => {
             assert.equal(data, "4")
             done()
           })
@@ -164,11 +129,11 @@ describe("holster", () => {
     }
     holster
       .get("hello")
-      .get("plain")
+      .then("plain")
       .put(plain, err => {
         assert.equal(err, null)
 
-        holster.get("hello").get("plain", data => {
+        holster.get("hello").then("plain", data => {
           assert.deepEqual(data, plain)
           done()
         })
@@ -191,10 +156,10 @@ describe("holster", () => {
         holster.get("nested", data => {
           assert.deepEqual(data, nested)
 
-          holster.get("nested").get("key", data => {
+          holster.get("nested").then("key", data => {
             assert.equal(data, "nested value")
 
-            holster.get("nested").get("child", data => {
+            holster.get("nested").then("child", data => {
               assert.deepEqual(data, {has: "child value"})
               done()
             })
@@ -213,24 +178,24 @@ describe("holster", () => {
     }
     holster
       .get("hello")
-      .get("nested")
+      .then("nested")
       .put(nested, err => {
         assert.equal(err, null)
 
         setTimeout(() => {
-          holster.get("hello").get("nested", data => {
+          holster.get("hello").then("nested", data => {
             assert.deepEqual(data, nested)
 
             holster
               .get("hello")
-              .get("nested")
-              .get("key", data => {
+              .then("nested")
+              .then("key", data => {
                 assert.equal(data, "hello nested value")
 
                 holster
                   .get("hello")
-                  .get("nested")
-                  .get("child", data => {
+                  .then("nested")
+                  .then("child", data => {
                     assert.deepEqual(data, {has: "hello child value"})
                     done()
                   })
@@ -257,10 +222,10 @@ describe("holster", () => {
         holster.get("two", data => {
           assert.deepEqual(data, two)
 
-          holster.get("two").get("child1", data => {
+          holster.get("two").then("child1", data => {
             assert.deepEqual(data, {has: "child value 1"})
 
-            holster.get("two").get("child2", data => {
+            holster.get("two").then("child2", data => {
               assert.deepEqual(data, {has: "child value 2"})
               done()
             })
@@ -288,23 +253,26 @@ describe("holster", () => {
         holster.get("multiple", data => {
           assert.deepEqual(data, multiple)
 
-          holster.get("multiple").get("child", {".": "has"}, data => {
+          holster.get("multiple").then("child", {".": "has"}, data => {
             assert.deepEqual(data, {has: "child value"})
 
             holster
               .get("multiple")
-              .get("child")
-              .get("grandchild", {".": "has"}, data => {
+              .then("child")
+              .then("grandchild", {".": "has"}, data => {
                 assert.deepEqual(data, {has: "grandchild value"})
-
-                fs.rm("test/holster", {recursive: true, force: true}, err => {
-                  assert.equal(err, null)
-                  done()
-                })
+                done()
               })
           })
         })
       }, 2)
+    })
+  })
+
+  test("cleanup", (t, done) => {
+    fs.rm("test/holster.put", {recursive: true, force: true}, err => {
+      assert.equal(err, null)
+      done()
     })
   })
 })
