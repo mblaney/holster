@@ -4,7 +4,7 @@ const {describe, test} = require("node:test")
 const assert = require("node:assert/strict")
 const Holster = require("../src/holster")
 
-describe("holster", () => {
+describe("holster.get", () => {
   const wss = new Server("ws://localhost:1234")
   const holster = Holster({file: "test/holster.get", wss: wss, maxAge: 100})
 

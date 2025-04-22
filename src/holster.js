@@ -83,7 +83,8 @@ const Holster = opt => {
       const ctx = allctx.get(ctxid)
       if (ctx && typeof ctx.cb !== "undefined") ctx.cb(data)
       else if (data) console.log(data)
-      allctx.delete(ctxid)
+      // A context updated by "on" should only be removed by "off".
+      if (!ctx.on) allctx.delete(ctxid)
     }
 
     const resolve = (request, cb) => {
@@ -378,7 +379,8 @@ const Holster = opt => {
         const {item, soul} = resolve({on: true}, cb)
         if (!soul) return
 
-        allctx.set(ctxid, {chain: [{item: item, soul: soul}]})
+        // Flag that this context is set from on and shouldn't be removed.
+        allctx.set(ctxid, {chain: [{item: item, soul: soul}], on: true})
         // Map the user's callback because it can also be passed to off,
         // so need a reference to it to compare them.
         map.set(cb, () => api(ctxid).then(null, cb))

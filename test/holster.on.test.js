@@ -4,7 +4,7 @@ const {describe, test} = require("node:test")
 const assert = require("node:assert/strict")
 const Holster = require("../src/holster")
 
-describe("holster", () => {
+describe("holster.on", () => {
   const wss = new Server("ws://localhost:1234")
   const holster = Holster({file: "test/holster.on", wss: wss, maxAge: 100})
 
@@ -22,6 +22,7 @@ describe("holster", () => {
 
       holster.get("key").on(data => {
         assert.equal(data, "update")
+        holster.get("key").off()
         done()
       })
 
@@ -43,6 +44,33 @@ describe("holster", () => {
     })
   })
 
+  test("on for property on root two updates - two events", (t, done) => {
+    holster.get("key3").put("value3", err => {
+      assert.equal(err, null)
+
+      let first = true
+      holster.get("key3").on(data => {
+        if (first) {
+          assert.equal(data, "update1")
+        } else {
+          assert.equal(data, "update2")
+          done()
+        }
+      })
+
+      holster.get("key3").put("update1", err => {
+        assert.equal(err, null)
+      })
+
+      setTimeout(() => {
+        first = false
+        holster.get("key3").put("update2", err => {
+          assert.equal(err, null)
+        })
+      }, 100)
+    })
+  })
+
   test("chained get before on", (t, done) => {
     // The node needs to exist before it can be listend to for updates.
     holster
@@ -56,6 +84,7 @@ describe("holster", () => {
           .then("world!")
           .on(data => {
             assert.equal(data, "update")
+            holster.get("hello").then("world!").off()
             done()
           })
 
