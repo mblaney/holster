@@ -7,19 +7,16 @@ const utils = require("./utils")
 const enq = String.fromCharCode(5)
 // ASCII character for unit separator.
 const unit = String.fromCharCode(31)
+// On-disk root node format.
+const root = unit + "+0" + unit + "#" + unit + '"root' + unit
 
-const fileSystem = dir => {
+const fileSystem = opt => {
+  const dir = opt.file
+
   if (jsEnv.isNode) {
     const fs = require("fs")
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir)
-    }
-    if (!fs.existsSync(dir + "/!")) {
-      fs.writeFileSync(
-        dir + "/!",
-        unit + "+0" + unit + "#" + unit + '"root' + unit,
-      )
-    }
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir)
+    if (!fs.existsSync(dir + "/!")) fs.writeFileSync(dir + "/!", root)
 
     return {
       get: (file, cb) => {
@@ -30,7 +27,7 @@ const fileSystem = dir => {
               return
             }
 
-            console.log("filesystem error:", err)
+            console.log("fs.readFile error:", err)
           }
           if (data) data = data.toString()
           cb(err, data)
@@ -58,10 +55,88 @@ const fileSystem = dir => {
     }
   }
 
-  // TODO: Add indexedDB
+  if (opt.indexedDB) {
+    let db
+    const o = indexedDB.open(dir, 1)
+    o.onupgradeneeded = event => {
+      event.target.result.createObjectStore(dir)
+    }
+    o.onerror = event => {
+      console.log(event)
+    }
+    o.onsuccess = () => {
+      db = o.result
+      // Create the root node if it doesn't exist.
+      if (db) {
+        const tx = db.transaction([dir], "readonly")
+        const req = tx.objectStore(dir).getKey("!")
+        req.onerror = () => {
+          console.log(`error getting key ${dir}/!`)
+        }
+        req.onsuccess = () => {
+          if (!req.result) {
+            const tx = db.transaction([dir], "readwrite")
+            const req = tx.objectStore(dir).put(root, "!")
+            req.onerror = () => {
+              console.log(`error putting root on ${dir}/!`)
+            }
+          }
+        }
+      } else {
+        console.log("error indexedDB not available")
+      }
+    }
+
+    return {
+      get: (file, cb) => {
+        if (db) {
+          const tx = db.transaction([dir], "readonly")
+          const req = tx.objectStore(dir).get(file)
+          req.onerror = () => {
+            console.log(`error getting ${dir}/${file}`)
+          }
+          req.onsuccess = () => {
+            cb(null, req.result)
+          }
+        } else {
+          cb("error indexedDB not available")
+        }
+      },
+      put: (file, data, cb) => {
+        if (db) {
+          const tx = db.transaction([dir], "readwrite")
+          const req = tx.objectStore(dir).put(data, file)
+          req.onerror = () => {
+            console.log(`error putting data on ${dir}/${file}`)
+          }
+          req.onsuccess = () => {
+            cb(null)
+          }
+        } else {
+          cb("error indexedDB not available")
+        }
+      },
+      list: cb => {
+        if (db) {
+          const tx = db.transaction([dir], "readonly")
+          const req = tx.objectStore(dir).getAllKeys()
+          req.onerror = () => console.log("error getting keys for", dir)
+          req.onsuccess = () => {
+            req.result.forEach(cb)
+            cb()
+          }
+        } else {
+          console.log("error indexedDB not available")
+          cb()
+        }
+      },
+    }
+  }
+
+  // No browser storage.
   return {
     get: (file, cb) => {
-      cb(null, unit + "+0" + unit + "#" + unit + '"root' + unit)
+      cb(null, root)
     },
     put: (file, data, cb) => {
       cb(null)
@@ -77,7 +152,7 @@ const fileSystem = dir => {
 const Store = opt => {
   if (!utils.obj.is(opt)) opt = {}
   opt.file = String(opt.file || "radata")
-  if (!opt.store) opt.store = fileSystem(opt.file)
+  if (!opt.store) opt.store = fileSystem(opt)
   const radisk = Radisk(opt)
 
   return {

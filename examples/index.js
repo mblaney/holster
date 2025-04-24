@@ -1,16 +1,19 @@
-const holster = Holster()
-
 // Set readFromDisk to true to force reading from disk.
 // (Restart the server so that graph is not in memory.)
 const readFromDisk = false
 
-// Wait for the websocket to connect.
-setTimeout(() => {
-  if (readFromDisk) {
+const holster = Holster({indexedDB: !readFromDisk})
+
+if (readFromDisk) {
+  // Wait for the websocket to connect.
+  setTimeout(() => {
     holster.get("mark").then("boss", {".": "species"}, data => {
       console.log("read from disk:", data)
     })
-  } else {
+  }, 1000)
+} else {
+  // Create two updates that could happen in either order.
+  setTimeout(() => {
     const update1 = {
       name: "Mark Nadal",
       boss: {
@@ -18,27 +21,25 @@ setTimeout(() => {
         species: "a kitty",
       },
     }
-    holster.get("mark").put(update1, err => {
-      console.log("update1:", err)
+    holster.get("mark").put(update1, err => console.log("update1:", err))
+  }, 1000 * Math.random())
 
-      // Holster API stores the chained key context, so can't use the API
-      // again until the first callback has returned.
-      const update2 = {
-        name: "Mark",
-        boss: {
-          species: "felis silvestris",
-          color: "ginger",
-        },
-      }
-      holster.get("mark").put(update2, err => {
-        console.log("update2:", err)
+  setTimeout(() => {
+    const update2 = {
+      name: "Mark",
+      boss: {
+        species: "felis silvestris",
+        color: "ginger",
+      },
+    }
+    holster.get("mark").put(update2, err => console.log("update2:", err))
+  }, 1000 * Math.random())
 
-        // The API sets the state on properties to the current time, so no
-        // conflict resolution available here to test.
-        holster.get("mark").then("boss", {".": "species"}, data => {
-          console.log("get:", data)
-        })
-      })
+  // The API sets the state on properties to the current time, so the result
+  // here depends on which update was called first.
+  setTimeout(() => {
+    holster.get("mark").then("boss", {".": "species"}, data => {
+      console.log("get:", data)
     })
-  }
-}, 1000)
+  }, 2000)
+}
