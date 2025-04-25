@@ -66,7 +66,7 @@ const Holster = opt => {
               const data = await new Promise(res => {
                 const _ctxid = utils.text.random()
                 allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
-                api(_ctxid).then(null, res)
+                api(_ctxid).next(null, res)
               })
               msg.put[soul][key] = data
             }
@@ -121,7 +121,7 @@ const Holster = opt => {
               // Not sure why the map needs to be set rather than just ctx?
               allctx.set(ctxid, {chain: ctx.chain, cb: ctx.cb})
               // Call api again using the updated context.
-              if (get) api(ctxid).then(null, request.get, cb)
+              if (get) api(ctxid).next(null, request.get, cb)
               else if (put) api(ctxid).put(request.put, cb)
               else if (on) api(ctxid).on(cb)
               else if (off) api(ctxid).off(cb)
@@ -165,7 +165,7 @@ const Holster = opt => {
         // The context has been resolved but it does not include the requested
         // node, which requires one more lookup.
         ctx.chain.push({item: null, soul: null})
-        api(ctxid).then(null, request.get, cb)
+        api(ctxid).next(null, request.get, cb)
         return false
       }
 
@@ -194,7 +194,7 @@ const Holster = opt => {
         const {soul} = resolve({get: lex}, done)
         if (soul) get(lex, soul, done)
       },
-      then: (key, lex, cb) => {
+      next: (key, lex, cb) => {
         const ack = data => {
           cb ? cb(data) : done(data)
         }
@@ -383,7 +383,7 @@ const Holster = opt => {
         allctx.set(ctxid, {chain: [{item: item, soul: soul}], on: true})
         // Map the user's callback because it can also be passed to off,
         // so need a reference to it to compare them.
-        map.set(cb, () => api(ctxid).then(null, cb))
+        map.set(cb, () => api(ctxid).next(null, cb))
         // Check if item is a rel and add event listener for the node.
         wire.get({"#": soul, ".": item}, async msg => {
           if (msg.err) {

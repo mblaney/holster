@@ -71,27 +71,27 @@ describe("holster.on", () => {
     })
   })
 
-  test("chained get before on", (t, done) => {
+  test("chained next before on", (t, done) => {
     // The node needs to exist before it can be listend to for updates.
     holster
       .get("hello")
-      .then("world!")
+      .next("world!")
       .put("ok", err => {
         assert.equal(err, null)
 
         holster
           .get("hello")
-          .then("world!")
+          .next("world!")
           .on(data => {
             assert.equal(data, "update")
-            holster.get("hello").then("world!").off()
+            holster.get("hello").next("world!").off()
             done()
           })
 
         setTimeout(() => {
           holster
             .get("hello")
-            .then("world!")
+            .next("world!")
             .put("update", err => {
               assert.equal(err, null)
             })
@@ -147,7 +147,7 @@ describe("holster.on", () => {
 
       holster
         .get("nested")
-        .then("child")
+        .next("child")
         .on(data => {
           assert.deepEqual(data, update.child)
           done()

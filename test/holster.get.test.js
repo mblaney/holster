@@ -44,8 +44,8 @@ describe("holster.get", () => {
     })
   })
 
-  test("then chained unknown keys callback null", (t, done) => {
-    holster.get("chained").then("unknown", data => {
+  test("next chained unknown keys callback null", (t, done) => {
+    holster.get("chained").next("unknown", data => {
       assert.equal(data, null)
       done()
     })

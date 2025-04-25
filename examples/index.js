@@ -7,7 +7,7 @@ const holster = Holster({indexedDB: !readFromDisk})
 if (readFromDisk) {
   // Wait for the websocket to connect.
   setTimeout(() => {
-    holster.get("mark").then("boss", {".": "species"}, data => {
+    holster.get("mark").next("boss", {".": "species"}, data => {
       console.log("read from disk:", data)
     })
   }, 1000)
@@ -38,7 +38,7 @@ if (readFromDisk) {
   // The API sets the state on properties to the current time, so the result
   // here depends on which update was called first.
   setTimeout(() => {
-    holster.get("mark").then("boss", {".": "species"}, data => {
+    holster.get("mark").next("boss", {".": "species"}, data => {
       console.log("get:", data)
     })
   }, 2000)
