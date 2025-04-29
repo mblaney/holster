@@ -1,7 +1,9 @@
-const jsEnv = require("browser-or-node")
-const Radisk = require("./radisk")
-const Radix = require("./radix")
-const utils = require("./utils")
+import Radisk from "./radisk.js"
+import Radix from "./radix.js"
+import * as utils from "./utils.js"
+
+const isNode = typeof document === "undefined"
+const fs = isNode ? await import("node:fs") : undefined
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)
@@ -13,8 +15,7 @@ const root = unit + "+0" + unit + "#" + unit + '"root' + unit
 const fileSystem = opt => {
   const dir = opt.file
 
-  if (jsEnv.isNode) {
-    const fs = require("fs")
+  if (isNode) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir)
     if (!fs.existsSync(dir + "/!")) fs.writeFileSync(dir + "/!", root)
 
@@ -219,4 +220,4 @@ const Store = opt => {
   }
 }
 
-module.exports = Store
+export default Store

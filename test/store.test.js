@@ -1,7 +1,7 @@
-const {describe, test} = require("node:test")
-const assert = require("node:assert/strict")
-const Store = require("../src/store")
-const fs = require("fs")
+import {describe, test} from "node:test"
+import assert from "node:assert/strict"
+import Store from "../src/store.js"
+import fs from "fs"
 
 describe("store", () => {
   const kitty = Store({file: "test/kitty"})

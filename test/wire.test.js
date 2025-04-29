@@ -1,8 +1,8 @@
-const fs = require("fs")
-const {Server} = require("mock-socket")
-const {describe, test} = require("node:test")
-const assert = require("node:assert/strict")
-const Wire = require("../src/wire")
+import fs from "fs"
+import {Server} from "mock-socket"
+import {describe, test} from "node:test"
+import assert from "node:assert/strict"
+import Wire from "../src/wire.js"
 
 describe("wire", () => {
   // Need different websocket servers otherwise data on file will sync up.

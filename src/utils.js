@@ -1,10 +1,10 @@
-const num = {
+export const num = {
   is: n =>
     !(n instanceof Array) &&
     (n - parseFloat(n) + 1 >= 0 || Infinity === n || -Infinity === n),
 }
 
-const obj = {
+export const obj = {
   is: o => {
     if (!o) return false
 
@@ -54,7 +54,7 @@ const map_soul = (soul, key, o) => {
 }
 
 // Check if an object is a soul relation, ie {'#': 'UUID'}
-const rel = {
+export const rel = {
   is: value => {
     if (value && value["#"] && !value._ && obj.is(value)) {
       let o = {}
@@ -68,7 +68,7 @@ const rel = {
   ify: soul => obj.put({}, "#", soul),
 }
 
-const text = {
+export const text = {
   random: length => {
     var s = ""
     const c = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXZabcdefghijklmnopqrstuvwxyz"
@@ -79,5 +79,3 @@ const text = {
     return s
   },
 }
-
-module.exports = {num, obj, rel, text}

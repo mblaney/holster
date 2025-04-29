@@ -222,4 +222,4 @@ const Names = () => {
   ]
 }
 
-module.exports = Names
+export default Names

@@ -1,5 +1,5 @@
-const utils = require("./utils")
-const Wire = require("./wire")
+import * as utils from "./utils.js"
+import Wire from "./wire.js"
 
 const Holster = opt => {
   const wire = Wire(opt)
@@ -430,4 +430,4 @@ const Holster = opt => {
   return api()
 }
 
-module.exports = Holster
+export default Holster

@@ -1,9 +1,16 @@
-const jsEnv = require("browser-or-node")
-const Dup = require("./dup")
-const Get = require("./get")
-const Ham = require("./ham")
-const Store = require("./store")
-const utils = require("./utils")
+import Dup from "./dup.js"
+import Get from "./get.js"
+import Ham from "./ham.js"
+import Store from "./store.js"
+import * as utils from "./utils.js"
+
+const isNode = typeof document === "undefined"
+
+const wsModule = isNode ? await import("ws") : undefined
+
+if (typeof globalThis.WebSocket === "undefined") {
+  globalThis.WebSocket = wsModule?.WebSocket
+}
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)
@@ -149,14 +156,13 @@ const Wire = opt => {
     }
   }
 
-  if (jsEnv.isNode) {
-    const WebSocket = require("ws")
+  if (isNode) {
     let wss = opt.wss
     // Node's websocket server provides clients as an array, whereas
     // mock-sockets provides clients as a function that returns an array.
     let clients = () => wss.clients()
     if (!wss) {
-      wss = new WebSocket.Server({port: 8080})
+      wss = new wsModule.WebSocketServer({port: 8080})
       clients = () => wss.clients
     }
 
@@ -236,4 +242,4 @@ const Wire = opt => {
   return api(send)
 }
 
-module.exports = Wire
+export default Wire

@@ -1,5 +1,5 @@
-const Radix = require("./radix")
-const utils = require("./utils")
+import Radix from "./radix.js"
+import * as utils from "./utils.js"
 
 // ASCII character for end of text.
 const etx = String.fromCharCode(3)
@@ -435,4 +435,4 @@ Radisk.decode = (data, obj) => {
   }
 }
 
-module.exports = Radisk
+export default Radisk
