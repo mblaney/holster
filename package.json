@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test",
-    "build": "esbuild src/holster.js --bundle --format=esm --sourcemap \"--external:node:*\" \"--external:ws\" --minify --outfile=build/holster.js"
+    "build": "esbuild src/holster.js --bundle --format=esm --sourcemap \"--external:node:*\" \"--external:ws\" --minify --outdir=build"
   },
   "keywords": [],
   "author": "",

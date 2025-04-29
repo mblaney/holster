@@ -6,9 +6,11 @@ import * as utils from "./utils.js"
 
 const isNode = typeof document === "undefined"
 
-const WebSocketServer = isNode
-  ? (await import("ws")).WebSocketServer
-  : undefined
+const wsModule = isNode ? await import("ws") : undefined
+
+if (typeof globalThis.WebSocket === "undefined") {
+  globalThis.WebSocket = wsModule?.WebSocket
+}
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)
@@ -160,7 +162,7 @@ const Wire = opt => {
     // mock-sockets provides clients as a function that returns an array.
     let clients = () => wss.clients()
     if (!wss) {
-      wss = new WebSocketServer({port: 8080})
+      wss = new wsModule.WebSocketServer({port: 8080})
       clients = () => wss.clients
     }
 
