@@ -1,7 +1,7 @@
-const {describe, test} = require("node:test")
-const assert = require("node:assert/strict")
-const Radisk = require("../src/radisk")
-const Names = require("./names.js")
+import {describe, test} from "node:test"
+import assert from "node:assert/strict"
+import Radisk from "../src/radisk.js"
+import Names from "./names.js"
 const names = Names()
 
 describe("radisk", () => {

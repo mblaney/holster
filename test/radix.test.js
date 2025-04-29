@@ -1,7 +1,7 @@
-const {describe, test} = require("node:test")
-const assert = require("node:assert/strict")
-const Radix = require("../src/radix")
-const Names = require("./names.js")
+import {describe, test} from "node:test"
+import assert from "node:assert/strict"
+import Radix from "../src/radix.js"
+import Names from "./names.js"
 const names = Names()
 
 // ASCII character for group separator.

@@ -1,8 +1,8 @@
-const fs = require("fs")
-const {Server} = require("mock-socket")
-const {describe, test} = require("node:test")
-const assert = require("node:assert/strict")
-const Holster = require("../src/holster")
+import fs from "fs"
+import {Server} from "mock-socket"
+import {describe, test} from "node:test"
+import assert from "node:assert/strict"
+import Holster from "../src/holster.js"
 
 describe("holster.get", () => {
   const wss = new Server("ws://localhost:1234")
