@@ -11,10 +11,12 @@ to get started using the API, and for more information.
 
 ### Quick Start
 
-- Clone this repo and then run the server with `node src/index.js`.
-- Open `file:///install-path/examples/index.html` in the browser.
+- Clone this repo and then run the development servers with `npm run dev`.
+  - > **NOTE**: The development file server is only designed for local
+    > development. Do not run it in production.
+- Open <http://localhost:8000/examples/index.html> in the browser.
 - You will then also have access to the Holster API via the `holster` object in
-the console.
+  the console.
 
 ### Development
 
