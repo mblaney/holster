@@ -5,6 +5,7 @@ import Holster from "../src/holster.js"
 const readFromDisk = false
 
 const holster = Holster({indexedDB: !readFromDisk})
+self.holster = holster
 
 if (readFromDisk) {
   // Wait for the websocket to connect.
