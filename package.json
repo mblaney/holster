@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test",
-    "build": "webpack"
+    "build": "esbuild src/holster.js --bundle --format=esm --sourcemap \"--external:node:*\" \"--external:ws\" --minify --outfile=build/holster.js"
   },
   "keywords": [],
   "author": "",
@@ -16,10 +16,9 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "esbuild": "0.25.3",
     "mock-socket": "^9.3.1",
-    "prettier": "^3.4.2",
-    "webpack": "^5.97.1",
-    "webpack-cli": "^6.0.1"
+    "prettier": "^3.4.2"
   },
   "prettier": {
     "semi": false,
