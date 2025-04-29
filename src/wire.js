@@ -6,16 +6,20 @@ import * as utils from "./utils.js"
 
 const isNode = typeof document === "undefined"
 
+const WebSocketServer = isNode
+  ? (await import("ws")).WebSocketServer
+  : undefined
+
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)
 
 // Wire starts a websocket client or server and returns get and put methods
 // for access to the wire spec and storage.
-const Wire = async opt => {
+const Wire = opt => {
   if (!utils.obj.is(opt)) opt = {}
 
   const dup = Dup(opt.maxAge)
-  const store = await Store(opt)
+  const store = Store(opt)
   const graph = {}
   const queue = {}
   const listen = {}
@@ -151,13 +155,12 @@ const Wire = async opt => {
   }
 
   if (isNode) {
-    const WebSocket = await import("ws")
     let wss = opt.wss
     // Node's websocket server provides clients as an array, whereas
     // mock-sockets provides clients as a function that returns an array.
     let clients = () => wss.clients()
     if (!wss) {
-      wss = new WebSocket.WebSocketServer({port: 8080})
+      wss = new WebSocketServer({port: 8080})
       clients = () => wss.clients
     }
 

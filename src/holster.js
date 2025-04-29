@@ -1,8 +1,8 @@
 import * as utils from "./utils.js"
 import Wire from "./wire.js"
 
-const Holster = async opt => {
-  const wire = await Wire(opt)
+const Holster = opt => {
+  const wire = Wire(opt)
   // Map callbacks since the user's callback is not passed to wire.on.
   const map = new Map()
   // Allow concurrent calls to the api by storing each context.

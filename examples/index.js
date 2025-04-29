@@ -4,7 +4,7 @@ import Holster from "../src/holster.js"
 // (Restart the server so that graph is not in memory.)
 const readFromDisk = false
 
-const holster = await Holster({indexedDB: !readFromDisk})
+const holster = Holster({indexedDB: !readFromDisk})
 
 if (readFromDisk) {
   // Wait for the websocket to connect.

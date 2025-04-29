@@ -3,6 +3,7 @@ import Radix from "./radix.js"
 import * as utils from "./utils.js"
 
 const isNode = typeof document === "undefined"
+const fs = isNode ? await import("node:fs") : undefined
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)
@@ -11,11 +12,10 @@ const unit = String.fromCharCode(31)
 // On-disk root node format.
 const root = unit + "+0" + unit + "#" + unit + '"root' + unit
 
-const fileSystem = async opt => {
+const fileSystem = opt => {
   const dir = opt.file
 
   if (isNode) {
-    const fs = await import("node:fs")
     if (!fs.existsSync(dir)) fs.mkdirSync(dir)
     if (!fs.existsSync(dir + "/!")) fs.writeFileSync(dir + "/!", root)
 
@@ -150,10 +150,10 @@ const fileSystem = async opt => {
 }
 
 // Store provides get and put methods that can access radisk.
-const Store = async opt => {
+const Store = opt => {
   if (!utils.obj.is(opt)) opt = {}
   opt.file = String(opt.file || "radata")
-  if (!opt.store) opt.store = await fileSystem(opt)
+  if (!opt.store) opt.store = fileSystem(opt)
   const radisk = Radisk(opt)
 
   return {
