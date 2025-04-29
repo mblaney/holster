@@ -83,4 +83,4 @@ Ham.mix = (change, graph, listen) => {
   return {now: now, defer: defer, wait: wait}
 }
 
-module.exports = Ham
+export default Ham

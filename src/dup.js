@@ -20,4 +20,4 @@ const Dup = maxAge => {
   return dup
 }
 
-module.exports = Dup
+export default Dup

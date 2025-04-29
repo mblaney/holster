@@ -1,4 +1,4 @@
-const utils = require("./utils")
+import * as utils from "./utils.js"
 
 // ASCII character for group separator.
 const group = String.fromCharCode(29)
@@ -103,4 +103,4 @@ Radix.map = function map(radix, cb, opt, pre) {
   }
 }
 
-module.exports = Radix
+export default Radix

@@ -16,4 +16,4 @@ const Get = (lex, graph) => {
   return {[soul]: node}
 }
 
-module.exports = Get
+export default Get

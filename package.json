@@ -2,6 +2,7 @@
   "name": "holster",
   "version": "0.1.0",
   "description": "",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "test": "node --test",
@@ -11,7 +12,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "browser-or-node": "^3.0.0",
     "fs": "^0.0.1-security",
     "ws": "^8.18.0"
   },
