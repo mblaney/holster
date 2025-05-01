@@ -1,3 +1,4 @@
+// Switch src to build for the production version.
 import Holster from "../src/holster.js"
 
 // Set readFromDisk to true to force reading from disk.
@@ -5,6 +6,7 @@ import Holster from "../src/holster.js"
 const readFromDisk = false
 
 const holster = Holster({indexedDB: !readFromDisk})
+globalThis.holster = holster
 
 if (readFromDisk) {
   // Wait for the websocket to connect.

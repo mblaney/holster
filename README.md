@@ -2,17 +2,18 @@ Holster is a service that allows synchronising data between devices using
 either [Node.js](https://nodejs.org) or the browser.
 
 It is a port of [GunDB](https://gun.eco), following
-[Porting Gun](https://github.com/gundb/port) and is firstly a Node.js
-implementation which then uses [webpack](https://webpack.js.org) to build
-browser versions.
+[Porting Gun](https://github.com/gundb/port) and is implemented as JavaScript
+modules so that it can run in any environment. A build version of Holster is
+also provided using [esbuild](https://esbuild.github.io), to run in production.
 
 Check out the [Github Wiki](https://github.com/mblaney/holster/wiki) for how
 to get started using the API, and for more information.
 
 ### Quick Start
 
-- Clone this repo and then run the server with `node src/index.js`.
-- Open `file:///install-path/examples/index.html` in the browser.
+- Clone this repo and run `npm install`.
+- Run the server with `node src/index.js`.
+- Open `http://localhost:3000/examples/index.html` in the browser.
 - You will then also have access to the Holster API via the `holster` object in
 the console.
 

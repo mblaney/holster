@@ -7,17 +7,14 @@
   <body>
     <h2>Holster.wire - test examples</h2>
     <p>
-      This file loads the development build of Holster and then runs
-      <code>wire.js</code>, which contains examples from
-      <a href="https://github.com/gundb/port">Porting Gun</a>.
+      This file loads <code>wire.js</code> which contains examples that use the
+      Holster.wire API. These examples show how conflict resolution works, see
+      the console log for test output.
     </p>
     <p>
-      These examples use the wire spec to show how conflict resolution works,
-      see the console log for test output.
-    </p>
-    <p>
-      To run the production build, switch <code>src</code> to
-      <code>"../build/holster.min.js"</code> in this file.
+      The <code>wire.js</code> file is loaded as a module, which allows it to
+      import the development build of Holster. You can switch to the production
+      build by changing the import path at the top of the file.
     </p>
     <script type="module" src="./wire.js"></script>
   </body>

@@ -7,17 +7,17 @@
   <body>
     <h2>Holster - test examples</h2>
     <p>
-      This file loads the development build of Holster and then runs
-      <code>index.js</code>, which contains examples using the Holster API. See
-      the console log for test output.
+      This file loads <code>index.js</code> which contains examples that use the
+      Holster API. See the console log for test output.
+    </p>
+    <p>
+      The <code>index.js</code> file is loaded as a module, which allows it to
+      import the development build of Holster. You can switch to the production
+      build by changing the import path at the top of the file.
     </p>
     <p>
       See <a href="/examples/wire.html">wire.html</a> for examples that use the
       wire spec.
-    </p>
-    <p>
-      To run the production build, switch <code>src</code> to
-      <code>"../build/holster.min.js"</code> in this file.
     </p>
     <script type="module" src="/examples/index.js"></script>
   </body>
