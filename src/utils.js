@@ -68,6 +68,25 @@ export const rel = {
   ify: soul => obj.put({}, "#", soul),
 }
 
+export const userPublicKey = "_holster_user_public_key"
+
+// graph converts objects to graph format with updated states,
+// with optional meta data to verify signed data.
+export const graph = (soul, data, sig, pub) => {
+  const g = {[soul]: {_: {"#": soul, ">": {}, s: sig, p: pub}}}
+  for (const [key, value] of Object.entries(data)) {
+    g[soul][key] = value
+    g[soul]._[">"][key] = Date.now()
+  }
+  // If a public key is provided it also needs to be stored on the node to
+  // ensure that future updates are only possible with the same public key.
+  if (pub) {
+    g[soul][userPublicKey] = pub
+    g[soul]._[">"][userPublicKey] = Date.now()
+  }
+  return g
+}
+
 export const text = {
   random: length => {
     var s = ""

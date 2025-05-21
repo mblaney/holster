@@ -26,6 +26,43 @@ const Wire = opt => {
   const queue = {}
   const listen = {}
 
+  // The check function is required because user data must provide a public key
+  // so that it can be verified. The public key might verify the provided
+  // signature but not actually match the user under which the data is being
+  // stored. To avoid this, the current data on a soul needs to be checked to
+  // make sure the stored public key matches the one provided with the update.
+  const check = async (data, send, cb) => {
+    if (!cb) cb = console.log
+
+    for (const soul of Object.keys(data)) {
+      const msg = await new Promise(res => {
+        getWithCallback({"#": soul}, res, send)
+      })
+      if (msg.err) {
+        cb(msg.err)
+        return false
+      }
+
+      const node = data[soul]
+      const key = utils.userPublicKey
+      // If there is no current node then the data is ok to write without
+      // matching public keys, as the provided soul also needs a rel on the
+      // parent node which then also requires checking. Otherwise publc keys
+      // need to match for existing data.
+      if (!msg.put || !msg.put[soul] || msg.put[soul][key] === node._.p) {
+        continue
+      }
+
+      // If a soul exists but does not have a public key, then one should not be
+      // added because the node is not user data. The above check fails in this
+      // case if a public key is provided.
+      cb(`error public key does not match for soul: ${soul}`)
+      return false
+    }
+
+    return true
+  }
+
   const get = (msg, send) => {
     const ack = Get(msg.get, graph)
     if (ack) {
@@ -50,9 +87,11 @@ const Wire = opt => {
     }
   }
 
-  const put = (msg, send) => {
+  const put = async (msg, send) => {
+    if (!(await check(msg.put, send))) return
+
     // Store updates returned from Ham.mix and defer updates if required.
-    const update = Ham.mix(msg.put, graph, listen)
+    const update = await Ham.mix(msg.put, graph, opt.secure, listen)
     store.put(update.now, err => {
       send(
         JSON.stringify({
@@ -67,52 +106,59 @@ const Wire = opt => {
     }
   }
 
+  const getWithCallback = (lex, cb, send, opt) => {
+    if (!cb) return
+
+    if (!utils.obj.is(opt)) opt = {}
+    const ack = Get(lex, graph)
+    if (ack) {
+      cb({put: ack})
+      return
+    }
+
+    store.get(lex, (err, ack) => {
+      if (ack) {
+        cb({put: ack, err: err})
+        return
+      }
+
+      if (err) console.log(err)
+
+      const track = utils.text.random(9)
+      queue[track] = cb
+      send(
+        JSON.stringify({
+          "#": dup.track(track),
+          get: lex,
+        }),
+      )
+      // Respond to callback with null if no response.
+      setTimeout(() => {
+        const cb = queue[track]
+        if (cb) {
+          const id = lex["#"]
+          const ack = {[id]: null}
+          if (lex["."]) ack[id] = {[lex["."]]: null}
+          cb({put: ack})
+          delete queue[track]
+        }
+      }, opt.wait || 100)
+    })
+  }
+
   const api = send => {
     return {
       get: (lex, cb, opt) => {
-        if (!cb) return
-
-        if (!utils.obj.is(opt)) opt = {}
-        const ack = Get(lex, graph)
-        if (ack) {
-          cb({put: ack})
-          return
-        }
-
-        store.get(lex, (err, ack) => {
-          if (ack) {
-            cb({put: ack, err: err})
-            return
-          }
-
-          if (err) console.log(err)
-
-          const track = utils.text.random(9)
-          queue[track] = cb
-          send(
-            JSON.stringify({
-              "#": dup.track(track),
-              get: lex,
-            }),
-          )
-          // Respond to callback with null if no response.
-          setTimeout(() => {
-            const cb = queue[track]
-            if (cb) {
-              const id = lex["#"]
-              const ack = {[id]: null}
-              if (lex["."]) ack[id] = {[lex["."]]: null}
-              cb({put: ack})
-              delete queue[track]
-            }
-          }, opt.wait || 100)
-        })
+        getWithCallback(lex, cb, send, opt)
       },
-      put: (data, cb) => {
+      put: async (data, cb) => {
+        if (!(await check(data, send, cb))) return
+
         // Deferred updates are only stored using wire spec, they're ignored
         // here using the api. This is ok because correct timestamps should be
-        // used whereas wire spec needs to handle clock skew.
-        const update = Ham.mix(data, graph, listen)
+        // used whereas wire spec needs to handle clock skew for updates
+        // across the network.
+        const update = await Ham.mix(data, graph, opt.secure, listen)
         store.put(update.now, cb)
         // Also put data on the wire spec.
         // TODO: Note that this means all clients now receive all updates, so

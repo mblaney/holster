@@ -16,19 +16,24 @@ describe("wire", () => {
   ws.onmessage = m => {
     const msg = JSON.parse(m.data)
     if (msg.get) {
-      let replied = true
       const soul = msg.get["#"]
+      const put = {
+        [soul]: {
+          _: {"#": soul, ">": {test: 1}},
+          test: "property",
+        },
+      }
+      let track = "item"
+      if (!msg.get["."]) {
+        put[soul]._[">"].other = 2
+        put[soul].other = "value"
+        track = "node"
+      }
       ws.send(
         JSON.stringify({
-          "#": "test",
+          "#": track,
           "@": msg["#"],
-          put: {
-            [soul]: {
-              _: {"#": soul, ">": {test: 1, other: 2}},
-              test: "property",
-              other: "value",
-            },
-          },
+          put: put,
         }),
       )
     }
@@ -136,14 +141,15 @@ describe("wire", () => {
             },
           },
         })
-
-        fs.rm("test/wire", {recursive: true, force: true}, err => {
-          assert.equal(err, null)
-          done()
-          // Exit because wss2.stop() is not working?
-          process.exit()
-        })
+        done()
       })
+    })
+  })
+
+  test("cleanup", (t, done) => {
+    fs.rm("test/wire", {recursive: true, force: true}, err => {
+      assert.equal(err, null)
+      done()
     })
   })
 })

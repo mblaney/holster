@@ -1,3 +1,4 @@
+import {userPublicKey} from "./utils.js"
 import * as utils from "./sea-utils.js"
 import SafeBuffer from "./buffer.js"
 
@@ -39,6 +40,11 @@ const SEA = {
     return pair
   },
   encrypt: async (data, pair, cb) => {
+    if (!pair || !pair.epriv) {
+      if (cb) cb(null)
+      return null
+    }
+
     const rand = {s: utils.random(9), iv: utils.random(15)}
     const ct = await utils.aeskey(pair.epriv, rand.s).then(aes => {
       return utils.subtle.encrypt(
@@ -59,6 +65,11 @@ const SEA = {
     return enc
   },
   decrypt: async (enc, pair, cb) => {
+    if (!enc || !enc.ct || !enc.iv || !enc.s || !pair || !pair.epriv) {
+      if (cb) cb(null)
+      return null
+    }
+
     const data = {
       ct: SafeBuffer.from(enc.ct, "base64"),
       iv: SafeBuffer.from(enc.iv, "base64"),
@@ -86,7 +97,12 @@ const SEA = {
     }
   },
   verify: async (data, pair, cb) => {
-    const check = utils.parse(data)
+    if (!pair || !pair.pub) {
+      if (cb) cb(null)
+      return null
+    }
+
+    const signed = utils.parse(data)
     const key = await utils.subtle.importKey(
       "jwk",
       utils.jwk(pair.pub),
@@ -94,16 +110,22 @@ const SEA = {
       false,
       ["verify"],
     )
-    const hash = await utils.sha256(check.m)
-    const sig = new Uint8Array(SafeBuffer.from(check.s, "base64"))
-    const ok = await utils.subtle.verify(
-      {name: "ECDSA", hash: {name: "SHA-256"}},
-      key,
-      sig,
-      new Uint8Array(hash),
-    )
-    if (ok) {
-      const verified = utils.parse(check.m)
+
+    let msg = {}
+    if (typeof signed.m === "string") {
+      msg = signed.m
+    } else {
+      // Allow data to be passed in with graph meta data,
+      // (which should not be part of signature, so not verified).
+      for (const k of Object.keys(signed.m)) {
+        if (k !== "_" && k != userPublicKey) msg[k] = signed.m[k]
+      }
+    }
+    const hash = await utils.sha256(msg)
+    const sig = new Uint8Array(SafeBuffer.from(signed.s, "base64"))
+    const alg = {name: "ECDSA", hash: {name: "SHA-256"}}
+    if (await utils.subtle.verify(alg, key, sig, new Uint8Array(hash))) {
+      const verified = utils.parse(signed.m)
       if (cb) cb(verified)
       return verified
     }
@@ -112,6 +134,11 @@ const SEA = {
     return null
   },
   sign: async (data, pair, cb) => {
+    if (!pair || !pair.pub || !pair.priv) {
+      if (cb) cb(null)
+      return null
+    }
+
     const msg = utils.parse(data)
     const hash = await utils.sha256(msg)
     const jwk = utils.jwk(pair.pub, pair.priv)
@@ -160,6 +187,11 @@ const SEA = {
     return pair
   },
   secret: async (to, from, cb) => {
+    if (!to || !to.epub || !from || !from.epub || !from.epriv) {
+      if (cb) cb(null)
+      return null
+    }
+
     const alg = {name: "ECDH", namedCurve: "P-256"}
     const pub = utils.jwk(to.epub)
     const pubKey = await utils.subtle.importKey("jwk", pub, alg, true, [])
@@ -183,8 +215,9 @@ const SEA = {
         )
         return utils.subtle.exportKey("jwk", derivedKey).then(({k}) => k)
       })
-    if (cb) cb(derived)
-    return derived
+    // Use "pair" format so that secret can be used as epriv by encrypt.
+    if (cb) cb({epriv: derived})
+    return {epriv: derived}
   },
 }
 

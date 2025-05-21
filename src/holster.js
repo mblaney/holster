@@ -1,8 +1,11 @@
 import * as utils from "./utils.js"
 import Wire from "./wire.js"
+import User from "./user.js"
+import SEA from "./sea.js"
 
 const Holster = opt => {
   const wire = Wire(opt)
+  const user = User(null, wire)
   // Map callbacks since the user's callback is not passed to wire.on.
   const map = new Map()
   // Allow concurrent calls to the api by storing each context.
@@ -41,24 +44,13 @@ const Holster = opt => {
     return `error ${data} cannot be converted to a graph`
   }
 
-  // graph converts objects to graph format with updated states.
-  const graph = (soul, data, g) => {
-    if (!g) g = {[soul]: {_: {"#": soul, ">": {}}}}
-    else g[soul] = {_: {"#": soul, ">": {}}}
-
-    for (const [key, value] of Object.entries(data)) {
-      g[soul][key] = value
-      g[soul]._[">"][key] = Date.now()
-    }
-    return g
-  }
-
   const api = ctxid => {
     const get = (lex, soul, ack) => {
       wire.get(utils.obj.put(lex, "#", soul), async msg => {
         if (msg.err) console.log(msg.err)
         if (msg.put && msg.put[soul]) {
           delete msg.put[soul]._
+          delete msg.put[soul][utils.userPublicKey]
           // Resolve any rels on the node before returning to the user.
           for (const key of Object.keys(msg.put[soul])) {
             const id = utils.rel.is(msg.put[soul][key])
@@ -77,6 +69,27 @@ const Holster = opt => {
           ack(null)
         }
       })
+    }
+
+    const graph = async (soul, data, cb) => {
+      if (!cb) cb = console.log
+
+      if (!user.is) {
+        if (opt.secure) {
+          cb(`error putting data on ${soul}: user required in secure mode`)
+          return null
+        }
+
+        return utils.graph(soul, data)
+      }
+
+      if (!user.is) {
+        cb(`error putting data on ${soul}: user not authenticated`)
+        return null
+      }
+
+      const signed = await SEA.sign(data, user.is)
+      return utils.graph(soul, signed.m, signed.s, user.is.pub)
     }
 
     const done = data => {
@@ -106,7 +119,7 @@ const Holster = opt => {
         // Found a soul that needs resolving, need the previous context
         // (ie the parent node) to find a soul relation for it.
         const {item, soul} = ctx.chain[i - 1]
-        wire.get({"#": soul, ".": item}, msg => {
+        wire.get({"#": soul, ".": item}, async msg => {
           if (msg.err) {
             console.log(`error getting ${item} on ${soul}: ${msg.err}`)
             if (cb) cb(null)
@@ -133,7 +146,10 @@ const Holster = opt => {
               // Request was chained before put, so rel doesn't exist yet.
               id = utils.text.random()
               const rel = {[item]: utils.rel.ify(id)}
-              wire.put(graph(soul, rel), err => {
+              const g = await graph(soul, rel, cb)
+              if (g === null) return
+
+              wire.put(g, err => {
                 if (err) {
                   cb(`error putting ${item} on ${soul}: ${err}`)
                   return
@@ -184,10 +200,13 @@ const Holster = opt => {
           return
         }
 
-        ctxid = utils.text.random()
         // Top level keys are added to a root node so their values don't need
-        // to be objects.
-        allctx.set(ctxid, {chain: [{item: key, soul: "root"}], cb: cb})
+        // to be objects, the user's public key is used as the root node when
+        // user.ctx is set.
+        const root = user.ctx ? user.ctx : "root"
+
+        ctxid = utils.text.random()
+        allctx.set(ctxid, {chain: [{item: key, soul: root}], cb: cb})
         if (!cb) return api(ctxid)
 
         // When there's a callback need to resolve the context first.
@@ -280,7 +299,10 @@ const Holster = opt => {
             const id = utils.rel.is(current)
             if (!id) {
               // Not a rel, can just put the data.
-              wire.put(graph(soul, {[item]: data}), ack)
+              const g = await graph(soul, {[item]: data}, ack)
+              if (g === null) return
+
+              wire.put(g, ack)
               return
             }
 
@@ -298,6 +320,8 @@ const Holster = opt => {
               delete msg.put[id]._
               // null each of the properties on the node before putting data.
               for (const key of Object.keys(msg.put[id])) {
+                if (key === utils.userPublicKey) continue
+
                 const err = await new Promise(res => {
                   const _ctxid = utils.text.random()
                   allctx.set(_ctxid, {chain: [{item: key, soul: id}]})
@@ -308,7 +332,10 @@ const Holster = opt => {
                   return
                 }
               }
-              wire.put(graph(soul, {[item]: data}), ack)
+              const g = await graph(soul, {[item]: data}, ack)
+              if (g === null) return
+
+              wire.put(g, ack)
             })
           })
           return
@@ -318,7 +345,7 @@ const Holster = opt => {
         // Need to check if a rel has already been added on the current node.
         wire.get({"#": soul, ".": item}, async msg => {
           if (msg.err) {
-            ack(`error getting ${soul}: ${msg.err}`)
+            ack(`error getting ${soul}.${item}: ${msg.err}`)
             return
           }
 
@@ -327,7 +354,10 @@ const Holster = opt => {
           if (!id) {
             // The current rel doesn't exist, so add it first.
             const rel = {[item]: utils.rel.ify(utils.text.random())}
-            wire.put(graph(soul, rel), err => {
+            const g = await graph(soul, rel, ack)
+            if (g === null) return
+
+            wire.put(g, err => {
               if (err) {
                 ack(`error putting ${item} on ${soul}: ${err}`)
               } else {
@@ -362,8 +392,14 @@ const Holster = opt => {
               return
             }
           }
-          if (put) wire.put(graph(id, update), ack)
-          else ack()
+          if (put) {
+            const g = await graph(id, update, ack)
+            if (g === null) return
+
+            wire.put(g, ack)
+          } else {
+            ack()
+          }
         })
       },
       on: cb => {
@@ -385,9 +421,9 @@ const Holster = opt => {
         // so need a reference to it to compare them.
         map.set(cb, () => api(ctxid).next(null, cb))
         // Check if item is a rel and add event listener for the node.
-        wire.get({"#": soul, ".": item}, async msg => {
+        wire.get({"#": soul, ".": item}, msg => {
           if (msg.err) {
-            console.log(`error getting ${soul}: ${msg.err}`)
+            console.log(`error getting ${soul}.${item}: ${msg.err}`)
             return
           }
 
@@ -409,9 +445,9 @@ const Holster = opt => {
         if (!soul) return
 
         // Check if item is a rel and remove event listener for the node.
-        wire.get({"#": soul, ".": item}, async msg => {
+        wire.get({"#": soul, ".": item}, msg => {
           if (msg.err) {
-            console.log(`error getting ${soul}: ${msg.err}`)
+            console.log(`error getting ${soul}.${item}: ${msg.err}`)
             return
           }
 
@@ -423,8 +459,18 @@ const Holster = opt => {
           allctx.delete(ctxid)
         })
       },
+      user: pub => {
+        // Return the combined Holster and User APIs. Passing in a public key
+        // will set the user context to that key, otherwise user.ctx is set when
+        // a user logs in so that their public key will be used as the root node
+        // in get(), also put() will sign all graph updates for verification.
+        if (pub) user.ctx = "~" + pub
+        return Object.assign(user, api())
+      },
       // Allow the wire spec to be used via holster.
       wire: wire,
+      // Allow SEA functions to be used via holster.
+      SEA: SEA,
     }
   }
   return api()
