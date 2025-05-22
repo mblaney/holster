@@ -96,17 +96,23 @@ Ham.mix = async (change, graph, secure, listen) => {
 
         // Wait the shortest difference before trying the updates again.
         if (wait === 0 || skew < wait) wait = nodeWait = skew
-        if (!defer[soul]) defer[soul] = {_: {"#": soul, ">": {}}}
+        if (!defer[soul]) {
+          defer[soul] = {_: {"#": soul, ">": {}, s: node._.s, p: node._.p}}
+        }
         defer[soul][key] = value
         defer[soul]._[">"][key] = state
       } else {
         const result = Ham(state, currentState, value, currentValue)
         if (result.incoming) {
-          if (!now[soul]) now[soul] = {_: {"#": soul, ">": {}}}
+          if (!now[soul]) {
+            now[soul] = {_: {"#": soul, ">": {}, s: node._.s, p: node._.p}}
+          }
           // TODO: graph should not just grow indefintitely in memory.
           // Need to have a max size after which start dropping the oldest state
           // Do something similar to Dup which can handle deletes?
-          if (!graph[soul]) graph[soul] = {_: {"#": soul, ">": {}}}
+          if (!graph[soul]) {
+            graph[soul] = {_: {"#": soul, ">": {}, s: node._.s, p: node._.p}}
+          }
           graph[soul][key] = now[soul][key] = value
           graph[soul]._[">"][key] = now[soul]._[">"][key] = state
           // Call event listeners for update on key, mix is called before

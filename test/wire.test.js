@@ -136,6 +136,8 @@ describe("wire", () => {
               _: {
                 "#": "key",
                 ">": {value: 1},
+                p: undefined,
+                s: undefined,
               },
               value: "wire test",
             },
