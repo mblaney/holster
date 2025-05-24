@@ -42,8 +42,10 @@ Ham.mix = async (change, graph, secure, listen) => {
     let pub = ""
     let verify = secure
 
+    if (!node || !node._) continue
+
     // If a signature and public key are provided then always verify.
-    if (node._ && node._.s && node._.p) verify = true
+    if (node._.s && node._.p) verify = true
 
     // Special case if soul starts with "~". Node must be system data ie,
     // ~@alias or ~publickey. For aliases, key and value must be a self
@@ -54,7 +56,7 @@ Ham.mix = async (change, graph, secure, listen) => {
         alias = true
         verify = false
       } else {
-        if (node._ && node._.p && soul != "~" + node._.p) {
+        if (node._.p && soul != "~" + node._.p) {
           console.log(`error public key does not match for soul: ${soul}`)
           continue
         }
@@ -67,7 +69,7 @@ Ham.mix = async (change, graph, secure, listen) => {
       }
     }
     if (verify) {
-      if (!node._ || !node._.s || !node._.p) {
+      if (!node._.s || !node._.p) {
         console.log("error signature and public key required to verify data")
         continue
       }

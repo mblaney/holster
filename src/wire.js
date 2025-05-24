@@ -42,12 +42,13 @@ const Wire = opt => {
       }
 
       const node = data[soul]
+      const pub = node._ ? node._.p : undefined
       const key = utils.userPublicKey
       // If there is no current node then the data is ok to write without
       // matching public keys, as the provided soul also needs a rel on the
       // parent node which then also requires checking. Otherwise publc keys
       // need to match for existing data.
-      if (!msg.put || !msg.put[soul] || msg.put[soul][key] === node._.p) {
+      if (!msg.put || !msg.put[soul] || msg.put[soul][key] === pub) {
         continue
       }
 
@@ -95,16 +96,18 @@ const Wire = opt => {
 
     // Store updates returned from Ham.mix and defer updates if required.
     const update = await Ham.mix(msg.put, graph, opt.secure, listen)
-    store.put(update.now, err => {
-      send(
-        JSON.stringify({
-          "#": dup.track(utils.text.random(9)),
-          "@": msg["#"],
-          err: err,
-        }),
-      )
-    })
-    if (update.wait !== 0) {
+    if (Object.keys(update.now).length) {
+      store.put(update.now, err => {
+        send(
+          JSON.stringify({
+            "#": dup.track(utils.text.random(9)),
+            "@": msg["#"],
+            err: err,
+          }),
+        )
+      })
+    }
+    if (Object.keys(update.defer).length) {
       setTimeout(() => put({put: update.defer}, send), update.wait)
     }
   }
@@ -162,6 +165,8 @@ const Wire = opt => {
         // used whereas wire spec needs to handle clock skew for updates
         // across the network.
         const update = await Ham.mix(data, graph, opt.secure, listen)
+        if (!Object.keys(update.now).length) return
+
         store.put(update.now, cb)
         // Also put data on the wire spec.
         // TODO: Note that this means all clients now receive all updates, so
