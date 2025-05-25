@@ -109,6 +109,8 @@ describe("wire", () => {
             _: {
               "#": "not on disk",
               ">": {test: 1},
+                p: undefined,
+                s: undefined,
             },
             test: "property",
           },

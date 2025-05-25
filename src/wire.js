@@ -92,11 +92,11 @@ const Wire = opt => {
   }
 
   const put = async (msg, send) => {
-    if (!(await check(msg.put, send))) return
-
     // Store updates returned from Ham.mix and defer updates if required.
     const update = await Ham.mix(msg.put, graph, opt.secure, listen)
     if (Object.keys(update.now).length) {
+      if (!(await check(update.now, send))) return
+
       store.put(update.now, err => {
         send(
           JSON.stringify({
@@ -158,14 +158,13 @@ const Wire = opt => {
         getWithCallback(lex, cb, send, opt)
       },
       put: async (data, cb) => {
-        if (!(await check(data, send, cb))) return
-
         // Deferred updates are only stored using wire spec, they're ignored
         // here using the api. This is ok because correct timestamps should be
         // used whereas wire spec needs to handle clock skew for updates
         // across the network.
         const update = await Ham.mix(data, graph, opt.secure, listen)
-        if (!Object.keys(update.now).length) return
+        if (!Object.keys(update.now).length ||
+            !(await check(update.now, send, cb))) return
 
         store.put(update.now, cb)
         // Also put data on the wire spec.
