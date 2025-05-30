@@ -1,5 +1,5 @@
-Holster is a service that allows synchronising data between devices using
-either [Node.js](https://nodejs.org) or the browser.
+Holster is a service that allows synchronising data between devices using Node,
+Deno, Bun or the browser.
 
 It is a port of [GunDB](https://gun.eco), following
 [Porting Gun](https://github.com/gundb/port) and is implemented as JavaScript
