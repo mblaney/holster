@@ -97,7 +97,7 @@ const Holster = opt => {
       if (ctx && typeof ctx.cb !== "undefined") ctx.cb(data)
       else if (data) console.log(data)
       // A context updated by "on" should only be removed by "off".
-      if (!ctx.on) allctx.delete(ctxid)
+      if (ctx && !ctx.on) allctx.delete(ctxid)
     }
 
     const resolve = (request, cb) => {
@@ -136,7 +136,7 @@ const Holster = opt => {
               // Call api again using the updated context.
               if (get) api(ctxid).next(null, request.get, cb)
               else if (put) api(ctxid).put(request.put, cb)
-              else if (on) api(ctxid).on(cb)
+              else if (on) api(ctxid).on(request.on, cb)
               else if (off) api(ctxid).off(cb)
             } else if (get) {
               // Request was not for a node, return a property on the current
@@ -200,6 +200,12 @@ const Holster = opt => {
           return
         }
 
+        // lex requires a callback as it's not included in the chain below.
+        if (lex && !cb) {
+          console.log("lex requires a callback function")
+          return
+        }
+
         // Top level keys are added to a root node so their values don't need
         // to be objects, the user's public key is used as the root node when
         // user.ctx is set.
@@ -228,6 +234,17 @@ const Holster = opt => {
           return
         }
 
+        if (key === "" || key === "_") {
+          ack(null)
+          return
+        }
+
+        // lex requires a callback as it's not included in the chain below.
+        if (lex && !cb) {
+          console.log("lex requires a callback function")
+          return
+        }
+
         const ctx = allctx.get(ctxid)
         // ctx already removed by another chained callback is ok?
         if (!ctx) return
@@ -236,11 +253,6 @@ const Holster = opt => {
           // This (and ack) allows nested objects to set their own callbacks.
           ctx.cb = cb
           cb = null
-        }
-
-        if (key === "" || key === "_") {
-          ack(null)
-          return
         }
 
         // Push the key to the context as it needs a soul lookup.
@@ -398,11 +410,16 @@ const Holster = opt => {
 
             wire.put(g, ack)
           } else {
-            ack()
+            // Callback on behalf of nested objects.
+            ack(null)
           }
         })
       },
-      on: cb => {
+      on: (lex, cb) => {
+        if (typeof lex === "function") {
+          cb = lex
+          lex = null
+        }
         if (!cb) return
 
         if (!ctxid) {
@@ -412,7 +429,7 @@ const Holster = opt => {
         }
 
         // Resolve the current context before adding event listener.
-        const {item, soul} = resolve({on: true}, cb)
+        const {item, soul} = resolve({on: lex}, cb)
         if (!soul) return
 
         // Flag that this context is set from on and shouldn't be removed.
@@ -429,8 +446,14 @@ const Holster = opt => {
 
           const current = msg.put && msg.put[soul] && msg.put[soul][item]
           const id = utils.rel.is(current)
-          if (id) wire.on({"#": id}, map.get(cb))
-          else wire.on({"#": soul, ".": item}, map.get(cb))
+          if (id) {
+            if (lex) lex = utils.obj.put(lex, "#", id)
+            else lex = {"#": id, ".": null}
+          } else {
+            if (lex) lex = utils.obj.put(lex, "#", soul)
+            else lex = {"#": soul, ".": item}
+          }
+          wire.on(lex, map.get(cb))
         })
       },
       off: cb => {
@@ -454,7 +477,7 @@ const Holster = opt => {
           const current = msg.put && msg.put[soul] && msg.put[soul][item]
           const id = utils.rel.is(current)
           if (id) wire.off({"#": id}, map.get(cb))
-          else wire.off({"#": soul, ".": item}, map.get(cb))
+          else wire.off({"#": soul}, map.get(cb))
           map.delete(cb)
           allctx.delete(ctxid)
         })

@@ -87,6 +87,30 @@ export const graph = (soul, data, sig, pub) => {
   return g
 }
 
+export const match = (lex, key) => {
+  // Null is used to match listeners on souls, which don't provide a key.
+  if (typeof key === "undefined") return lex === null
+
+  if (typeof lex === "undefined") return true
+
+  if (typeof lex === "string") return lex === key
+
+  if (!obj.is(lex) || !key) return false
+
+  const prefix = lex["*"]
+  if (prefix) return key.slice(0, prefix.length) === prefix
+
+  const gt = lex[">"]
+  const lt = lex["<"]
+  if (gt && lt) return key >= gt && key <= lt
+
+  if (gt) return key >= gt
+
+  if (lt) return key <= lt
+
+  return false
+}
+
 export const text = {
   random: length => {
     var s = ""

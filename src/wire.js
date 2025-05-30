@@ -12,9 +12,6 @@ if (typeof globalThis.WebSocket === "undefined") {
   globalThis.WebSocket = wsModule?.WebSocket
 }
 
-// ASCII character for enquiry.
-const enq = String.fromCharCode(5)
-
 // Wire starts a websocket client or server and returns get and put methods
 // for access to the wire spec and storage.
 const Wire = opt => {
@@ -144,7 +141,7 @@ const Wire = opt => {
         if (cb) {
           const id = lex["#"]
           const ack = {[id]: null}
-          if (lex["."]) ack[id] = {[lex["."]]: null}
+          if (typeof lex["."] === "string") ack[id] = {[lex["."]]: null}
           cb({put: ack})
           delete queue[track]
         }
@@ -163,8 +160,8 @@ const Wire = opt => {
         // used whereas wire spec needs to handle clock skew for updates
         // across the network.
         const update = await Ham.mix(data, graph, opt.secure, listen)
-        if (!Object.keys(update.now).length ||
-            !(await check(update.now, send, cb))) return
+        const none = Object.keys(update.now).length === 0
+        if (none || !(await check(update.now, send, cb))) return
 
         store.put(update.now, cb)
         // Also put data on the wire spec.
@@ -178,32 +175,27 @@ const Wire = opt => {
         )
       },
       on: (lex, cb) => {
-        if (!cb) return
+        const soul = lex && lex["#"]
+        if (!soul || !cb) return
 
-        let id = lex["#"]
-        if (!id) return
-
-        if (lex["."]) id += enq + lex["."]
-        if (listen[id]) {
-          if (!listen[id].includes(cb)) listen[id].push(cb)
+        if (listen[soul]) {
+          listen[soul].push({".": lex["."], cb: cb})
         } else {
-          listen[id] = [cb]
+          listen[soul] = [{".": lex["."], cb: cb}]
         }
       },
       off: (lex, cb) => {
-        let id = lex["#"]
-        if (!id) return
-
-        if (lex["."]) id += enq + lex["."]
-        if (!listen[id]) return
+        const soul = lex && lex["#"]
+        if (!soul || !listen[soul]) return
 
         if (cb) {
-          if (listen[id].includes(cb)) {
-            listen[id].splice(listen[id].indexOf(cb), 1)
+          const found = listen[soul].find(l => l.cb === cb)
+          if (found) {
+            listen[soul].splice(listen[soul].indexOf(found), 1)
           }
         } else {
           // Remove all callbacks when none provided.
-          delete listen[id]
+          delete listen[soul]
         }
       },
     }

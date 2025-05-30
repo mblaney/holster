@@ -1,6 +1,6 @@
 const Get = (lex, graph) => {
   const soul = lex["#"]
-  const key = lex["."]
+  const key = typeof lex["."] === "string" ? lex["."] : false
   var node = graph[soul]
 
   // Can only return a node if a key is provided, because the graph may not

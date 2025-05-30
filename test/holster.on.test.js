@@ -22,7 +22,6 @@ describe("holster.on", () => {
 
       holster.get("key").on(data => {
         assert.equal(data, "update")
-        holster.get("key").off()
         done()
       })
 
@@ -136,7 +135,6 @@ describe("holster.on", () => {
       assert.equal(err, null)
 
       const update = {
-        key: "nested update",
         child: {
           has: "child update",
         },

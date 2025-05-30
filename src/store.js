@@ -164,9 +164,11 @@ const Store = opt => {
       }
 
       var soul = lex["#"]
-      var key = lex["."] || ""
+      var key = typeof lex["."] === "string" ? lex["."] : ""
       var node
       const each = (value, key) => {
+        if (!utils.match(lex["."], key)) return
+
         if (!node) node = {_: {"#": soul, ">": {}}}
         node[key] = value[0]
         node._[">"][key] = value[1]

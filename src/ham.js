@@ -1,9 +1,6 @@
 import * as utils from "./utils.js"
 import SEA from "./sea.js"
 
-// ASCII character for enquiry.
-const enq = String.fromCharCode(5)
-
 // state and value are the incoming changes.
 // currentState and currentValue are the current graph data.
 const Ham = (state, currentState, value, currentValue) => {
@@ -120,10 +117,15 @@ Ham.mix = async (change, graph, secure, listen) => {
           // Call event listeners for update on key, mix is called before
           // put has finished so wait for what could be multiple nested
           // updates on a node.
-          setTimeout(() => {
-            const id = soul + enq + key
-            if (listen[id]) listen[id].forEach(cb => cb())
-          }, 100)
+          if (listen[soul]) {
+            setTimeout(() => {
+              if (listen[soul]) {
+                listen[soul]
+                  .filter(l => utils.match(l["."], key))
+                  .forEach(l => l.cb())
+              }
+            }, 100)
+          }
           updated = true
         }
       }
@@ -137,7 +139,9 @@ Ham.mix = async (change, graph, secure, listen) => {
     // Call event listeners for update on soul.
     if (updated && listen[soul]) {
       setTimeout(() => {
-        listen[soul].forEach(cb => cb())
+        if (listen[soul]) {
+          listen[soul].filter(l => utils.match(l["."])).forEach(l => l.cb())
+        }
       }, 100)
     }
   }
