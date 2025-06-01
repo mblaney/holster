@@ -15,8 +15,6 @@ if (typeof globalThis.WebSocket === "undefined") {
 // Wire starts a websocket client or server and returns get and put methods
 // for access to the wire spec and storage.
 const Wire = opt => {
-  if (!utils.obj.is(opt)) opt = {}
-
   const dup = Dup(opt.maxAge)
   const store = Store(opt)
   const graph = {}
@@ -207,7 +205,10 @@ const Wire = opt => {
     // mock-sockets provides clients as a function that returns an array.
     let clients = () => wss.clients()
     if (!wss) {
-      wss = new wsModule.WebSocketServer({port: 8080})
+      const config = opt.server
+        ? {server: opt.server}
+        : {port: opt.port || 8765}
+      wss = new wsModule.WebSocketServer(config)
       clients = () => wss.clients
     }
 
@@ -244,46 +245,57 @@ const Wire = opt => {
     return api(send)
   }
 
-  let ws = new WebSocket("ws://localhost:8080")
+  const peers = []
   const send = data => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.log("websocket not available")
-      return
-    }
-
-    ws.send(data)
+    peers.forEach(peer => {
+      if (peer && peer.readyState === WebSocket.OPEN) {
+        peer.send(data)
+      } else {
+        console.log("websocket not available")
+      }
+    })
   }
-  const start = () => {
-    if (!ws) ws = new WebSocket("ws://localhost:8080")
-    ws.onclose = c => {
-      ws = null
-      setTimeout(start, Math.floor(Math.random() * 5000))
-    }
-    ws.onerror = e => {
-      console.error(e)
-    }
-    ws.onmessage = m => {
-      const msg = JSON.parse(m.data)
-      if (dup.check(msg["#"])) return
+  if (!(opt.peers instanceof Array)) {
+    opt.peers = [`ws://localhost:${opt.port || 8765}`]
+  }
+  opt.peers.forEach(peer => {
+    let ws = new WebSocket(peer)
+    peers.push(ws)
+    const start = () => {
+      if (!ws) ws = new WebSocket(peer)
+      ws.onclose = c => {
+        if (peers.indexOf(ws) !== -1) {
+          peers.splice(peers.indexOf(ws), 1)
+        }
+        ws = null
+        setTimeout(start, Math.floor(Math.random() * 5000))
+      }
+      ws.onerror = e => {
+        console.error(e)
+      }
+      ws.onmessage = m => {
+        const msg = JSON.parse(m.data)
+        if (dup.check(msg["#"])) return
 
-      dup.track(msg["#"])
-      if (msg.get) get(msg, send)
-      if (msg.put) put(msg, send)
-      send(m.data)
+        dup.track(msg["#"])
+        if (msg.get) get(msg, send)
+        if (msg.put) put(msg, send)
+        send(m.data)
 
-      const id = msg["@"]
-      const cb = queue[id]
-      if (cb) {
-        delete msg["#"]
-        delete msg["@"]
-        cb(msg)
+        const id = msg["@"]
+        const cb = queue[id]
+        if (cb) {
+          delete msg["#"]
+          delete msg["@"]
+          cb(msg)
 
-        delete queue[id]
+          delete queue[id]
+        }
       }
     }
-  }
+    start()
+  })
 
-  start()
   return api(send)
 }
 

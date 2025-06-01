@@ -4,6 +4,10 @@ import User from "./user.js"
 import SEA from "./sea.js"
 
 const Holster = opt => {
+  if (typeof opt === "string") opt = {peers: [opt]}
+  else if (opt instanceof Array) opt = {peers: opt}
+  else if (!utils.obj.is(opt)) opt = {}
+
   const wire = Wire(opt)
   const user = User(null, wire)
   // Map callbacks since the user's callback is not passed to wire.on.
@@ -264,7 +268,11 @@ const Holster = opt => {
         const {soul} = resolve({get: lex}, ack)
         if (soul) get(lex, soul, ack)
       },
-      put: (data, cb) => {
+      put: (data, set, cb) => {
+        if (typeof set === "function") {
+          cb = set
+          set = false
+        }
         const ack = err => {
           cb ? cb(err) : done(err)
         }
@@ -285,6 +293,7 @@ const Holster = opt => {
           ctx.cb = cb
           cb = null
         }
+        if (set) data = {[utils.text.random()]: data}
 
         const result = check(data)
         if (typeof result === "string") {

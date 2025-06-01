@@ -269,6 +269,65 @@ describe("holster.put", () => {
     })
   })
 
+  test("holster put string with set", (t, done) => {
+    holster.get("set").put("first", true, err => {
+      assert.equal(err, null)
+
+      holster.get("set", data => {
+        assert.equal(Object.values(data)[0], "first")
+
+        setTimeout(() => {
+          holster.get("set").put("second", true, err => {
+            assert.equal(err, null)
+
+            holster.get("set", data => {
+              for (const value of Object.values(data)) {
+                assert.ok(value === "first" || value === "second")
+              }
+              done()
+            })
+          })
+        }, 2)
+      })
+    })
+  })
+
+  test("holster put object with set", (t, done) => {
+    const set1 = {
+      key: "value 1",
+      child: "child value 1",
+    }
+    const set2 = {
+      key: "value 2",
+      child: "child value 2",
+    }
+    holster.get("set2").put(set1, true, err => {
+      assert.equal(err, null)
+
+      holster.get("set2", data => {
+        assert.deepEqual(Object.values(data)[0], set1)
+
+        setTimeout(() => {
+          holster.get("set2").put(set2, true, err => {
+            assert.equal(err, null)
+
+            holster.get("set2", data => {
+              for (const value of Object.values(data)) {
+                if (value.key === "value 1") {
+                  assert.deepEqual(value, set1)
+                }
+                if (value.key === "value 2") {
+                  assert.deepEqual(value, set2)
+                }
+              }
+              done()
+            })
+          })
+        }, 2)
+      })
+    })
+  })
+
   test("cleanup", (t, done) => {
     fs.rm("test/holster.put", {recursive: true, force: true}, err => {
       assert.equal(err, null)

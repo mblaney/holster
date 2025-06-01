@@ -71,6 +71,11 @@ setTimeout(() => {
 }, 2000)
 
 setTimeout(() => {
+  if (!bob) {
+    console.log("Something went wrong, bob didn't log in.")
+    return
+  }
+
   // Use Bob's public key to fetch shared data under his account.
   holster.user(bob.pub).get("shared", enc => {
     user.auth("alice", "password", async err => {
