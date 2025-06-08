@@ -2,7 +2,7 @@ import SafeBuffer from "./buffer.js"
 
 const isNode = typeof document === "undefined"
 const crypto = isNode
-  ? (await import("node:crypto")).webcrypto
+  ? (await import(/*webpackIgnore: true*/ "node:crypto")).webcrypto
   : globalThis.crypto
 export const subtle = crypto.subtle
 

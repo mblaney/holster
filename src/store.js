@@ -3,7 +3,7 @@ import Radix from "./radix.js"
 import * as utils from "./utils.js"
 
 const isNode = typeof document === "undefined"
-const fs = isNode ? await import("node:fs") : undefined
+const fs = isNode ? await import(/*webpackIgnore: true*/ "node:fs") : undefined
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)

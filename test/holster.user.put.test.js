@@ -291,7 +291,25 @@ describe("holster.user.put", () => {
     })
   })
 
-  test("get number using public key", (t, done) => {
+  test("get number using public key - logged in", (t, done) => {
+    let ok = false
+
+    holster.user(alice).get("pi", data => {
+      assert.equal(data, 3.14159)
+      if (ok) done()
+      else ok = true
+    })
+
+    // Not reusing the existing user here resets the stored public key used
+    // above, but that is ok because they use separate contexts.
+    holster.user().get("pi", data => {
+      assert.equal(data, 3.14159)
+      if (ok) done()
+      else ok = true
+    })
+  })
+
+  test("get number using public key - logged out", (t, done) => {
     user.leave()
 
     holster.user(alice).get("pi", data => {

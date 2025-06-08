@@ -14,6 +14,8 @@ const Holster = opt => {
   const map = new Map()
   // Allow concurrent calls to the api by storing each context.
   const allctx = new Map()
+  // Allow user queries by public key
+  let publicKey
 
   const ok = data => {
     return (
@@ -49,51 +51,50 @@ const Holster = opt => {
   }
 
   const api = ctxid => {
-    const get = (lex, soul, ack) => {
-      wire.get(utils.obj.put(lex, "#", soul), async msg => {
-        if (msg.err) console.log(msg.err)
-        if (msg.put && msg.put[soul]) {
-          delete msg.put[soul]._
-          delete msg.put[soul][utils.userPublicKey]
-          // Resolve any rels on the node before returning to the user.
-          for (const key of Object.keys(msg.put[soul])) {
-            const id = utils.rel.is(msg.put[soul][key])
-            if (id) {
-              const data = await new Promise(res => {
-                const _ctxid = utils.text.random()
-                allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
-                api(_ctxid).next(null, res)
-              })
-              msg.put[soul][key] = data
+    const get = (lex, soul, ack, opt) => {
+      wire.get(
+        utils.obj.put(lex, "#", soul),
+        async msg => {
+          if (msg.err) console.log(msg.err)
+          if (msg.put && msg.put[soul]) {
+            delete msg.put[soul]._
+            delete msg.put[soul][utils.userPublicKey]
+            // Resolve any rels on the node before returning to the user.
+            for (const key of Object.keys(msg.put[soul])) {
+              const id = utils.rel.is(msg.put[soul][key])
+              if (id) {
+                const data = await new Promise(res => {
+                  const _ctxid = utils.text.random()
+                  allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
+                  api(_ctxid).next(null, res)
+                })
+                msg.put[soul][key] = data
+              }
             }
+            ack(msg.put[soul])
+          } else {
+            // No data callback.
+            ack(null)
           }
-          ack(msg.put[soul])
-        } else {
-          // No data callback.
-          ack(null)
-        }
-      })
+        },
+        opt,
+      )
     }
 
     const graph = async (soul, data, cb) => {
       if (!cb) cb = console.log
 
-      if (!user.is) {
-        if (opt.secure) {
-          cb(`error putting data on ${soul}: user required in secure mode`)
-          return null
-        }
-
-        return utils.graph(soul, data)
+      if (user.is) {
+        const signed = await SEA.sign(data, user.is)
+        return utils.graph(soul, signed.m, signed.s, user.is.pub)
       }
 
-      if (!user.is) {
-        cb(`error putting data on ${soul}: user not authenticated`)
+      if (opt.secure) {
+        cb(`error putting data on ${soul}: user required in secure mode`)
         return null
       }
 
-      const signed = await SEA.sign(data, user.is)
-      return utils.graph(soul, signed.m, signed.s, user.is.pub)
+      return utils.graph(soul, data)
     }
 
     const done = data => {
@@ -194,7 +195,7 @@ const Holster = opt => {
     }
 
     return {
-      get: (key, lex, cb) => {
+      get: (key, lex, cb, opt) => {
         if (typeof lex === "function") {
           cb = lex
           lex = null
@@ -206,14 +207,14 @@ const Holster = opt => {
 
         // lex requires a callback as it's not included in the chain below.
         if (lex && !cb) {
-          console.log("lex requires a callback function")
+          console.log("error lex requires a callback function")
           return
         }
 
         // Top level keys are added to a root node so their values don't need
         // to be objects, the user's public key is used as the root node when
-        // user.ctx is set.
-        const root = user.ctx ? user.ctx : "root"
+        // publicKey or user.ctx is set.
+        const root = publicKey ? publicKey : user.ctx ? user.ctx : "root"
 
         ctxid = utils.text.random()
         allctx.set(ctxid, {chain: [{item: key, soul: root}], cb: cb})
@@ -221,9 +222,9 @@ const Holster = opt => {
 
         // When there's a callback need to resolve the context first.
         const {soul} = resolve({get: lex}, done)
-        if (soul) get(lex, soul, done)
+        if (soul) get(lex, soul, done, opt)
       },
-      next: (key, lex, cb) => {
+      next: (key, lex, cb, opt) => {
         const ack = data => {
           cb ? cb(data) : done(data)
         }
@@ -233,7 +234,7 @@ const Holster = opt => {
           lex = null
         }
         if (!ctxid) {
-          console.log("please provide a key using get(key)")
+          console.log("error please provide a key using get(key)")
           ack(null)
           return
         }
@@ -245,7 +246,7 @@ const Holster = opt => {
 
         // lex requires a callback as it's not included in the chain below.
         if (lex && !cb) {
-          console.log("lex requires a callback function")
+          console.log("error lex requires a callback function")
           return
         }
 
@@ -266,7 +267,7 @@ const Holster = opt => {
 
         // When there's a callback need to resolve the context first.
         const {soul} = resolve({get: lex}, ack)
-        if (soul) get(lex, soul, ack)
+        if (soul) get(lex, soul, ack, opt)
       },
       put: (data, set, cb) => {
         if (typeof set === "function") {
@@ -432,7 +433,7 @@ const Holster = opt => {
         if (!cb) return
 
         if (!ctxid) {
-          console.log("please provide a key using get(key)")
+          console.log("error please provide a key using get(key)")
           cb(null)
           return
         }
@@ -467,7 +468,7 @@ const Holster = opt => {
       },
       off: cb => {
         if (!ctxid) {
-          console.log("please provide a key using get(key)")
+          console.log("error please provide a key using get(key)")
           if (cb) cb(null)
           return
         }
@@ -496,7 +497,8 @@ const Holster = opt => {
         // will set the user context to that key, otherwise user.ctx is set when
         // a user logs in so that their public key will be used as the root node
         // in get(), also put() will sign all graph updates for verification.
-        if (pub) user.ctx = "~" + pub
+        if (pub) publicKey = "~" + pub
+        else publicKey = null
         return Object.assign(user, api())
       },
       // Allow the wire spec to be used via holster.

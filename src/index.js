@@ -3,7 +3,6 @@ import path from "path"
 import {fileURLToPath} from "url"
 import Holster from "./holster.js"
 
-// TODO: pass in opt for websocket url, etc.
 const holster = Holster()
 
 // Note that express is only used here to serve the examples folder. It is not
