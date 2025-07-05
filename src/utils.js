@@ -68,19 +68,26 @@ export const rel = {
   ify: soul => obj.put({}, "#", soul),
 }
 
+export const userSignature = "_holster_user_signature"
 export const userPublicKey = "_holster_user_public_key"
 
 // graph converts objects to graph format with updated states,
 // with optional meta data to verify signed data.
 export const graph = (soul, data, sig, pub) => {
-  const g = {[soul]: {_: {"#": soul, ">": {}, s: sig, p: pub}}}
+  const g = {[soul]: {_: {"#": soul, ">": {}}}}
   for (const [key, value] of Object.entries(data)) {
-    g[soul][key] = value
-    g[soul]._[">"][key] = Date.now()
+    if (key !== "_" && key != userPublicKey && key != userSignature) {
+      g[soul][key] = value
+      g[soul]._[">"][key] = Date.now()
+    }
   }
-  // If a public key is provided it also needs to be stored on the node to
-  // ensure that future updates are only possible with the same public key.
-  if (pub) {
+  // If a signature and public key are provided they also need to be stored on
+  // the node to ensure that future updates are only possible with the same
+  // public key. The signature is requried because later get requests will
+  // broadcast the data as a put, which other devices will need to verify.
+  if (sig && pub) {
+    g[soul][userSignature] = sig
+    g[soul]._[">"][userSignature] = Date.now()
     g[soul][userPublicKey] = pub
     g[soul]._[">"][userPublicKey] = Date.now()
   }

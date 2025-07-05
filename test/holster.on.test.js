@@ -37,10 +37,12 @@ describe("holster.on", () => {
       done() // This done is not called and test would fail if it was.
     })
 
-    holster.get("key2").put("value2", err => {
-      assert.equal(err, null)
-      done()
-    })
+    setTimeout(() => {
+      holster.get("key2").put("value2", err => {
+        assert.equal(err, null)
+        done()
+      })
+    }, 100)
   })
 
   test("on for property on root two updates - two events", (t, done) => {
@@ -67,6 +69,45 @@ describe("holster.on", () => {
           assert.equal(err, null)
         })
       }, 200)
+    })
+  })
+
+  test("on for properties on root in for loop", (t, done) => {
+    for (let i = 0; i < 5; i++) {
+      holster.get("for" + i).put(i, err => {
+        assert.equal(err, null)
+      })
+    }
+
+    // Need to wait until after all initial puts are done to set on listeners.
+    setTimeout(() => {
+      for (let i = 0; i < 5; i++) {
+        holster.get("for" + i).on(data => {
+          assert.equal(data, "update" + i)
+          if (i === 4) done()
+        })
+      }
+
+      setTimeout(() => {
+        for (let i = 0; i < 5; i++) {
+          holster.get("for" + i).put("update" + i, err => {
+            assert.equal(err, null)
+          })
+        }
+      }, 100)
+    }, 500)
+  })
+
+  test("on with get flag set - data returned", (t, done) => {
+    holster.get("key4").put("value4", err => {
+      assert.equal(err, null)
+
+      setTimeout(() => {
+        holster.get("key4").on(data => {
+          assert.equal(data, "value4")
+          done()
+        }, true)
+      }, 100)
     })
   })
 
@@ -140,7 +181,7 @@ describe("holster.on", () => {
         },
       }
       holster.get("nested").on(data => {
-        assert.deepEqual(data, update)
+        assert.deepEqual(data, {key: nested.key, ...update})
       })
 
       holster

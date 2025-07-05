@@ -10,7 +10,7 @@ let alice, bob
 // Wait for the websocket to connect.
 setTimeout(() => {
   user.create("alice", "password", err => {
-    if (err !== "Username already exists") {
+    if (err && err !== "Username already exists") {
       console.log(err)
       return
     }
@@ -40,7 +40,7 @@ setTimeout(() => {
 
 setTimeout(() => {
   user.create("bob", "stronger password", err => {
-    if (err !== "Username already exists") {
+    if (err && err !== "Username already exists") {
       console.log(err)
       return
     }
@@ -77,7 +77,7 @@ setTimeout(() => {
   }
 
   // Use Bob's public key to fetch shared data under his account.
-  holster.user(bob.pub).get("shared", enc => {
+  user.get([bob.pub, "shared"], enc => {
     user.auth("alice", "password", async err => {
       if (err) {
         console.log(err)

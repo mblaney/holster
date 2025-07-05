@@ -62,11 +62,23 @@ describe("holster.user.get", () => {
     })
   })
 
-  // Chaining get creates a new context for each call.
-  test("get chained unknown keys callback null", (t, done) => {
-    user.get("chained").get("unknown", data => {
+  test("get unknown keys in for loop callbacks null", (t, done) => {
+    for (let i = 0; i < 5; i++) {
+      user.get("unknown" + i, data => {
+        assert.equal(data, null)
+        if (i === 4) done()
+      })
+    }
+  })
+
+  test("nested get unknown key callback null", (t, done) => {
+    user.get("unknown", data => {
       assert.equal(data, null)
-      done()
+
+      user.get("unknown", data => {
+        assert.equal(data, null)
+        done()
+      })
     })
   })
 
@@ -74,6 +86,17 @@ describe("holster.user.get", () => {
     user.get("chained").next("unknown", data => {
       assert.equal(data, null)
       done()
+    })
+  })
+
+  test("nested next chained unknown keys callback null", (t, done) => {
+    user.get("chained").next("unknown", data => {
+      assert.equal(data, null)
+
+      user.get("chained").next("unknown", data => {
+        assert.equal(data, null)
+        done()
+      })
     })
   })
 

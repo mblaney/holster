@@ -37,13 +37,12 @@ const Wire = opt => {
       }
 
       const node = data[soul]
-      const pub = node._ ? node._.p : undefined
       const key = utils.userPublicKey
       // If there is no current node then the data is ok to write without
       // matching public keys, as the provided soul also needs a rel on the
       // parent node which then also requires checking. Otherwise publc keys
       // need to match for existing data.
-      if (!msg.put || !msg.put[soul] || msg.put[soul][key] === pub) {
+      if (!msg.put || !msg.put[soul] || msg.put[soul][key] === node[key]) {
         continue
       }
 
@@ -107,32 +106,38 @@ const Wire = opt => {
     }
   }
 
-  const getWithCallback = (lex, cb, send, opt) => {
+  const getWithCallback = (lex, cb, send, _opt) => {
     if (!cb) return
 
-    if (!utils.obj.is(opt)) opt = {}
+    if (!utils.obj.is(_opt)) _opt = {}
+
     const ack = Get(lex, graph)
+    const track = utils.text.random(9)
+    // Request the whole node in secure mode for verification.
+    const request = JSON.stringify({
+      "#": dup.track(track),
+      get: opt.secure ? {"#": lex["#"]} : lex,
+    })
+
     if (ack) {
+      // Also send request on the wire to check for updates.
+      send(request)
       cb({put: ack})
       return
     }
 
     store.get(lex, (err, ack) => {
       if (ack) {
+        // Also send request on the wire to check for updates.
+        send(request)
         cb({put: ack, err: err})
         return
       }
 
       if (err) console.log(err)
 
-      const track = utils.text.random(9)
       queue[track] = cb
-      send(
-        JSON.stringify({
-          "#": dup.track(track),
-          get: lex,
-        }),
-      )
+      send(request)
       // Respond to callback with null if no response.
       setTimeout(() => {
         const cb = queue[track]
@@ -143,14 +148,14 @@ const Wire = opt => {
           cb({put: ack})
           delete queue[track]
         }
-      }, opt.wait || 100)
+      }, _opt.wait || 100)
     })
   }
 
   const api = send => {
     return {
-      get: (lex, cb, opt) => {
-        getWithCallback(lex, cb, send, opt)
+      get: (lex, cb, _opt) => {
+        getWithCallback(lex, cb, send, _opt)
       },
       put: async (data, cb) => {
         // Deferred updates are only stored using wire spec, they're ignored
@@ -172,7 +177,7 @@ const Wire = opt => {
           }),
         )
       },
-      on: (lex, cb) => {
+      on: (lex, cb, _get, _opt) => {
         const soul = lex && lex["#"]
         if (!soul || !cb) return
 
@@ -181,6 +186,7 @@ const Wire = opt => {
         } else {
           listen[soul] = [{".": lex["."], cb: cb}]
         }
+        if (_get) getWithCallback(lex, cb, send, _opt)
       },
       off: (lex, cb) => {
         const soul = lex && lex["#"]

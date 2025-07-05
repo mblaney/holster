@@ -1,18 +1,25 @@
+import {match} from "./utils.js"
+
 const Get = (lex, graph) => {
   const soul = lex["#"]
-  const key = typeof lex["."] === "string" ? lex["."] : false
-  var node = graph[soul]
+  if (!graph[soul]) return
 
-  // Can only return a node if a key is provided, because the graph may not
-  // have all the keys populated for a given soul. This is because Ham.mix
-  // only adds incoming changes to the graph.
-  if (!node || !key) return
+  const node = {_: {"#": soul, ">": {}}}
 
-  let value = node[key]
-  if (!value) return
+  if (typeof lex["."] === "string") {
+    const key = lex["."]
+    if (typeof graph[soul][key] === "undefined") return
 
-  node = {_: node._, [key]: value}
-  node._[">"] = {[key]: node._[">"][key]}
+    node[key] = graph[soul][key]
+    node._[">"][key] = graph[soul]._[">"][key]
+  } else {
+    for (const key of Object.keys(graph[soul])) {
+      if (match(lex["."], key)) {
+        node[key] = graph[soul][key]
+        node._[">"][key] = graph[soul]._[">"][key]
+      }
+    }
+  }
   return {[soul]: node}
 }
 

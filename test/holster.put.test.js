@@ -63,6 +63,23 @@ describe("holster.put", () => {
     })
   })
 
+  test("put and get values in for loop on root", (t, done) => {
+    for (let i = 0; i < 5; i++) {
+      holster.get("for" + i).put(i, err => {
+        assert.equal(err, null)
+      })
+    }
+
+    setTimeout(() => {
+      for (let i = 0; i < 5; i++) {
+        holster.get("for" + i, data => {
+          assert.equal(data, i)
+          if (i === 4) setTimeout(done, 100)
+        })
+      }
+    }, 200)
+  })
+
   test("chained get before put", (t, done) => {
     holster
       .get("hello")
@@ -269,7 +286,7 @@ describe("holster.put", () => {
     })
   })
 
-  test("holster put string with set", (t, done) => {
+  test("put string with set", (t, done) => {
     holster.get("set").put("first", true, err => {
       assert.equal(err, null)
 
@@ -292,7 +309,7 @@ describe("holster.put", () => {
     })
   })
 
-  test("holster put object with set", (t, done) => {
+  test("put object with set", (t, done) => {
     const set1 = {
       key: "value 1",
       child: "child value 1",

@@ -26,9 +26,9 @@ const Ham = (state, currentState, value, currentValue) => {
 }
 
 Ham.mix = async (change, graph, secure, listen) => {
-  var machine = Date.now()
-  var now = {}
-  var defer = {}
+  const machine = Date.now()
+  const now = {}
+  const defer = {}
   let wait = 0
 
   for (const soul of Object.keys(change)) {
@@ -36,13 +36,14 @@ Ham.mix = async (change, graph, secure, listen) => {
     let updated = false
     let alias = false
     let nodeWait = 0
-    let pub = ""
     let verify = secure
 
     if (!node || !node._) continue
 
+    const sig = node[utils.userSignature]
+    const pub = node[utils.userPublicKey]
     // If a signature and public key are provided then always verify.
-    if (node._.s && node._.p) verify = true
+    if (sig && pub) verify = true
 
     // Special case if soul starts with "~". Node must be system data ie,
     // ~@alias or ~publickey. For aliases, key and value must be a self
@@ -53,25 +54,19 @@ Ham.mix = async (change, graph, secure, listen) => {
         alias = true
         verify = false
       } else {
-        if (node._.p && soul != "~" + node._.p) {
+        if (pub && soul != "~" + pub) {
           console.log(`error public key does not match for soul: ${soul}`)
           continue
         }
 
-        // Need to be able to create public key data before a user is
-        // authenticated, in this case the soul is the public key which
-        // should've been used to sign the data.
-        node._.p = soul.slice(1)
         verify = true
       }
     }
     if (verify) {
-      if (!node._.s || !node._.p) {
-        console.log("error signature and public key required to verify data")
-        continue
-      }
+      // Partial nodes can be read from disk, just ignore them.
+      if (!sig || !pub) continue
 
-      if (!(await SEA.verify({m: node, s: node._.s}, {pub: node._.p}))) {
+      if (!(await SEA.verify({m: node, s: sig}, {pub: pub}))) {
         console.log(`error could not verify soul: ${soul}`)
         continue
       }
@@ -81,11 +76,14 @@ Ham.mix = async (change, graph, secure, listen) => {
       if (key === "_") continue
 
       const value = node[key]
-      const state = node._[">"][key]
+      const state = node._ && node._[">"] ? node._[">"][key] : 0
       const currentValue = (graph[soul] || {})[key]
       const currentState = (graph[soul] || {_: {">": {}}})._[">"][key] || 0
 
-      if (alias && key !== utils.rel.is(value)) continue
+      if (alias && key !== utils.rel.is(value)) {
+        console.log(`error alias ${alias}: ${key} !== ${utils.rel.is(value)}`)
+        continue
+      }
 
       // Defer the update if ahead of machine time.
       const skew = state - machine
@@ -96,7 +94,7 @@ Ham.mix = async (change, graph, secure, listen) => {
         // Wait the shortest difference before trying the updates again.
         if (wait === 0 || skew < wait) wait = nodeWait = skew
         if (!defer[soul]) {
-          defer[soul] = {_: {"#": soul, ">": {}, s: node._.s, p: node._.p}}
+          defer[soul] = {_: {"#": soul, ">": {}}}
         }
         defer[soul][key] = value
         defer[soul]._[">"][key] = state
@@ -104,13 +102,13 @@ Ham.mix = async (change, graph, secure, listen) => {
         const result = Ham(state, currentState, value, currentValue)
         if (result.incoming) {
           if (!now[soul]) {
-            now[soul] = {_: {"#": soul, ">": {}, s: node._.s, p: node._.p}}
+            now[soul] = {_: {"#": soul, ">": {}}}
           }
           // TODO: graph should not just grow indefintitely in memory.
           // Need to have a max size after which start dropping the oldest state
           // Do something similar to Dup which can handle deletes?
           if (!graph[soul]) {
-            graph[soul] = {_: {"#": soul, ">": {}, s: node._.s, p: node._.p}}
+            graph[soul] = {_: {"#": soul, ">": {}}}
           }
           graph[soul][key] = now[soul][key] = value
           graph[soul]._[">"][key] = now[soul]._[">"][key] = state

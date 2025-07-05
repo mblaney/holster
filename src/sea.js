@@ -1,4 +1,4 @@
-import {userPublicKey} from "./utils.js"
+import {userPublicKey, userSignature} from "./utils.js"
 import * as utils from "./sea-utils.js"
 import SafeBuffer from "./buffer.js"
 
@@ -117,8 +117,10 @@ const SEA = {
     } else {
       // Allow data to be passed in with graph meta data,
       // (which should not be part of signature, so not verified).
-      for (const k of Object.keys(signed.m)) {
-        if (k !== "_" && k != userPublicKey) msg[k] = signed.m[k]
+      for (const k of Object.keys(signed.m).sort()) {
+        if (k !== "_" && k != userPublicKey && k != userSignature) {
+          msg[k] = signed.m[k]
+        }
       }
     }
     const hash = await utils.sha256(msg)
@@ -139,7 +141,17 @@ const SEA = {
       return null
     }
 
-    const msg = utils.parse(data)
+    let msg = {}
+    if (typeof data === "string") {
+      msg = data
+    } else {
+      const check = utils.parse(data)
+      for (const k of Object.keys(check).sort()) {
+        if (k !== "_" && k != userPublicKey && k != userSignature) {
+          msg[k] = check[k]
+        }
+      }
+    }
     const hash = await utils.sha256(msg)
     const jwk = utils.jwk(pair.pub, pair.priv)
     const alg = {name: "ECDSA", namedCurve: "P-256"}

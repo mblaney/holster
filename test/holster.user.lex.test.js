@@ -12,7 +12,6 @@ describe("holster.user.lex", () => {
     maxAge: 100,
   })
   const user = holster.user()
-  let alice = ""
 
   test("user create", (t, done) => {
     user.create("alice", "password", err => {
@@ -25,7 +24,6 @@ describe("holster.user.lex", () => {
     user.auth("alice", "password", err => {
       assert.equal(err, null)
       assert.equal(user.is.username, "alice")
-      alice = user.is.pub
       done()
     })
   })
@@ -84,6 +82,7 @@ describe("holster.user.lex", () => {
         other: "other child value",
       },
     }
+
     user.get("nested").put(nested, err => {
       assert.equal(err, null)
 
@@ -123,6 +122,7 @@ describe("holster.user.lex", () => {
           has: "child update",
         },
       }
+
       user
         .get("on-nested")
         .next("child")

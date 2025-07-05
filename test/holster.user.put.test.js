@@ -85,6 +85,28 @@ describe("holster.user.put", () => {
     })
   })
 
+  test("put and get values in for loop", (t, done) => {
+    ;(async () => {
+      for (let i = 0; i < 5; i++) {
+        // Need to be careful putting user properties in a loop as they are
+        // verified per node, so wait for each update to return.
+        const err = await new Promise(res => {
+          user.get("for" + i).put(i, res)
+        })
+        assert.equal(err, null)
+      }
+    })()
+
+    setTimeout(async () => {
+      for (let i = 0; i < 5; i++) {
+        user.get("for" + i, data => {
+          assert.equal(data, i)
+          if (i === 4) setTimeout(done, 100)
+        })
+      }
+    }, 500)
+  })
+
   test("chained get before put", (t, done) => {
     user
       .get("hello")
@@ -291,28 +313,80 @@ describe("holster.user.put", () => {
     })
   })
 
-  test("get number using public key - logged in", (t, done) => {
-    let ok = false
+  test("put string with set", (t, done) => {
+    user.get("set").put("first", true, err => {
+      assert.equal(err, null)
 
-    holster.user(alice).get("pi", data => {
-      assert.equal(data, 3.14159)
-      if (ok) done()
-      else ok = true
+      setTimeout(() => {
+        user.get("set", data => {
+          assert.equal(Object.values(data)[0], "first")
+
+          user.get("set").put("second", true, err => {
+            assert.equal(err, null)
+
+            setTimeout(() => {
+              user.get("set", data => {
+                for (const value of Object.values(data)) {
+                  assert.ok(value === "first" || value === "second")
+                }
+                done()
+              })
+            }, 2)
+          })
+        })
+      }, 2)
     })
+  })
 
-    // Not reusing the existing user here resets the stored public key used
-    // above, but that is ok because they use separate contexts.
-    holster.user().get("pi", data => {
+  test("put object with set", (t, done) => {
+    const set1 = {
+      key: "value 1",
+      child: "child value 1",
+    }
+    const set2 = {
+      key: "value 2",
+      child: "child value 2",
+    }
+    user.get("set2").put(set1, true, err => {
+      assert.equal(err, null)
+
+      setTimeout(() => {
+        user.get("set2", data => {
+          assert.deepEqual(Object.values(data)[0], set1)
+
+          user.get("set2").put(set2, true, err => {
+            assert.equal(err, null)
+
+            setTimeout(() => {
+              user.get("set2", data => {
+                for (const value of Object.values(data)) {
+                  if (value.key === "value 1") {
+                    assert.deepEqual(value, set1)
+                  }
+                  if (value.key === "value 2") {
+                    assert.deepEqual(value, set2)
+                  }
+                }
+                done()
+              })
+            }, 100)
+          })
+        })
+      }, 100)
+    })
+  })
+
+  test("get number using public key - logged in", (t, done) => {
+    user.get([alice, "pi"], data => {
       assert.equal(data, 3.14159)
-      if (ok) done()
-      else ok = true
+      done()
     })
   })
 
   test("get number using public key - logged out", (t, done) => {
     user.leave()
 
-    holster.user(alice).get("pi", data => {
+    user.get([alice, "pi"], data => {
       assert.equal(data, 3.14159)
       done()
     })
@@ -322,13 +396,10 @@ describe("holster.user.put", () => {
     const plain = {
       key: "hello plain value",
     }
-    holster
-      .user(alice)
-      .get("hello")
-      .next("plain", data => {
-        assert.deepEqual(data, plain)
-        done()
-      })
+    user.get([alice, "hello"]).next("plain", data => {
+      assert.deepEqual(data, plain)
+      done()
+    })
   })
 
   test("get nested object using public key", (t, done) => {
@@ -338,23 +409,17 @@ describe("holster.user.put", () => {
         has: "child value",
       },
     }
-    holster.user(alice).get("nested", data => {
+    user.get([alice, "nested"], data => {
       assert.deepEqual(data, nested)
 
-      holster
-        .user(alice)
-        .get("nested")
-        .next("key", data => {
-          assert.equal(data, "nested value")
+      user.get([alice, "nested"]).next("key", data => {
+        assert.equal(data, "nested value")
 
-          holster
-            .user(alice)
-            .get("nested")
-            .next("child", data => {
-              assert.deepEqual(data, {has: "child value"})
-              done()
-            })
+        user.get([alice, "nested"]).next("child", data => {
+          assert.deepEqual(data, {has: "child value"})
+          done()
         })
+      })
     })
   })
 
@@ -365,35 +430,32 @@ describe("holster.user.put", () => {
         has: "hello child value",
       },
     }
-    holster
-      .user(alice)
-      .get("hello")
-      .next("nested", data => {
-        assert.deepEqual(data, nested)
+    user.get([alice, "hello"]).next("nested", data => {
+      assert.deepEqual(data, nested)
 
-        holster
-          .user(alice)
-          .get("hello")
-          .next("nested")
-          .next("key", data => {
-            assert.equal(data, "hello nested value")
+      user
+        .get([alice, "hello"])
+        .next("nested")
+        .next("key", data => {
+          assert.equal(data, "hello nested value")
 
-            holster
-              .user(alice)
-              .get("hello")
-              .next("nested")
-              .next("child", data => {
-                assert.deepEqual(data, {has: "hello child value"})
-                done()
-              })
-          })
-      })
+          user
+            .get([alice, "hello"])
+            .next("nested")
+            .next("child", data => {
+              assert.deepEqual(data, {has: "hello child value"})
+              done()
+            })
+        })
+    })
   })
 
   test("cleanup", (t, done) => {
-    fs.rm("test/holster.user.put", {recursive: true, force: true}, err => {
-      assert.equal(err, null)
-      done()
-    })
+    setTimeout(() => {
+      fs.rm("test/holster.user.put", {recursive: true, force: true}, err => {
+        assert.equal(err, null)
+        done()
+      })
+    }, 100)
   })
 })

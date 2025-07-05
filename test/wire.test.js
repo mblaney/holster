@@ -109,8 +109,6 @@ describe("wire", () => {
             _: {
               "#": "not on disk",
               ">": {test: 1},
-              p: undefined,
-              s: undefined,
             },
             test: "property",
           },
@@ -138,8 +136,6 @@ describe("wire", () => {
               _: {
                 "#": "key",
                 ">": {value: 1},
-                p: undefined,
-                s: undefined,
               },
               value: "wire test",
             },
@@ -151,9 +147,12 @@ describe("wire", () => {
   })
 
   test("cleanup", (t, done) => {
-    fs.rm("test/wire", {recursive: true, force: true}, err => {
-      assert.equal(err, null)
-      done()
-    })
+    // Timeout to let extra wire sends finish before tests end.
+    setTimeout(() => {
+      fs.rm("test/wire", {recursive: true, force: true}, err => {
+        assert.equal(err, null)
+        done()
+      })
+    }, 100)
   })
 })
