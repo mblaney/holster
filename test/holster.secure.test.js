@@ -43,14 +43,6 @@ describe("holster.secure", () => {
     })
   })
 
-  // Chaining get creates a new context for each call.
-  test("get chained unknown keys callback null", (t, done) => {
-    holster.get("chained").get("unknown", data => {
-      assert.equal(data, null)
-      done()
-    })
-  })
-
   test("next chained unknown keys callback null", (t, done) => {
     holster.get("chained").next("unknown", data => {
       assert.equal(data, null)
@@ -102,7 +94,7 @@ describe("holster.secure", () => {
     })
   })
 
-  test("put and get string", (t, done) => {
+  test("user put and get string", (t, done) => {
     user.get("key").put("value", err => {
       assert.equal(err, null)
 

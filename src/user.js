@@ -48,20 +48,23 @@ const User = (opt, wire) => {
           priv: dec.priv,
           epriv: dec.epriv,
         }
-        // Holster API uses ctx to set the root node for user data.
-        user.ctx = "~" + data.pub
-
         if (newPassword !== "") {
           // Encrypt private key using new password and a new salt.
           const salt = utils.text.random(64)
           const work = await SEA.work(newPassword, salt)
           const enc = await SEA.encrypt(dec, work)
-          const auth = {auth: JSON.stringify({enc: enc, salt: salt})}
-          const signed = await SEA.sign(auth, user.is)
+          // Put all fields so that verification applies to the whole node.
+          const update = {
+            username: username,
+            pub: data.pub,
+            epub: data.epub,
+            auth: JSON.stringify({enc: enc, salt: salt}),
+          }
+          const signed = await SEA.sign(update, user.is)
           const graph = utils.graph(pub, signed.m, signed.s, data.pub)
           wire.put(graph, err => {
             if (err) {
-              done(`error putting ${auth} on ${pub}: ${err}`)
+              done(`error putting ${update} on ${pub}: ${err}`)
             } else {
               done(null)
             }
@@ -236,40 +239,37 @@ const User = (opt, wire) => {
         if (typeof globalThis.localStorage !== "undefined") {
           globalThis.localStorage.setItem("user.is", JSON.stringify(user.is))
         }
+        if (typeof globalThis.sessionStorage !== "undefined") {
+          globalThis.sessionStorage.removeItem("user.is")
+        }
         return
       }
 
       if (typeof globalThis.sessionStorage !== "undefined") {
         globalThis.sessionStorage.setItem("user.is", JSON.stringify(user.is))
       }
+      if (typeof globalThis.localStorage !== "undefined") {
+        globalThis.localStorage.removeItem("user.is")
+      }
     },
-    recall: localStorage => {
-      if (localStorage) {
-        if (typeof globalThis.localStorage !== "undefined") {
-          const is = globalThis.localStorage.getItem("user.is")
-          if (is) {
-            user.is = JSON.parse(is)
-            user.ctx = "~" + user.is.pub
-          } else {
-            console.log("User credentials not stored in local storage")
-          }
+    recall: () => {
+      if (typeof globalThis.localStorage !== "undefined") {
+        const is = globalThis.localStorage.getItem("user.is")
+        if (is) {
+          user.is = JSON.parse(is)
+          return
         }
-        return
       }
 
       if (typeof globalThis.sessionStorage !== "undefined") {
         const is = globalThis.sessionStorage.getItem("user.is")
         if (is) {
           user.is = JSON.parse(is)
-          user.ctx = "~" + user.is.pub
-        } else {
-          console.log("User credentials not stored in session storage")
         }
       }
     },
     leave: () => {
       user.is = null
-      user.ctx = null
       if (typeof globalThis.localStorage !== "undefined") {
         globalThis.localStorage.removeItem("user.is")
       }
@@ -316,7 +316,6 @@ const User = (opt, wire) => {
           }
 
           user.is = null
-          user.ctx = null
           // Return null on success. Note currently not updating ~@username,
           // not sure if allowing username re-user is a good idea anyway?
           if (cb) cb(null)

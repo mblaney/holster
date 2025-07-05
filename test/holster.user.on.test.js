@@ -69,6 +69,7 @@ describe("holster.user.on", () => {
           assert.equal(data, "update1")
         } else {
           assert.equal(data, "update2")
+          user.get("key3").off()
           done()
         }
       })
@@ -83,6 +84,54 @@ describe("holster.user.on", () => {
           assert.equal(err, null)
         })
       }, 200)
+    })
+  })
+
+  test("on for properties in for loop", (t, done) => {
+    ;(async () => {
+      for (let i = 0; i < 5; i++) {
+        // Need to be careful putting user properties in a loop as they are
+        // verified per node, so wait for each update to return.
+        const err = await new Promise(res => {
+          user.get("for" + i).put(i, res)
+        })
+        assert.equal(err, null)
+      }
+    })()
+
+    // Need to wait until after all initial puts are done to set on listeners.
+    setTimeout(async () => {
+      for (let i = 0; i < 5; i++) {
+        user.get("for" + i).on(data => {
+          assert.equal(data, "update" + i)
+          user.get("for" + i).off()
+          if (i === 4) done()
+        })
+      }
+
+      setTimeout(async () => {
+        for (let i = 0; i < 5; i++) {
+          // Same as above put, wait for each update to return.
+          const err = await new Promise(res => {
+            user.get("for" + i).put("update" + i, res)
+          })
+          assert.equal(err, null)
+        }
+      }, 500)
+    }, 1000)
+  })
+
+  test("on with get flag set - data returned", (t, done) => {
+    user.get("key4").put("value4", err => {
+      assert.equal(err, null)
+
+      setTimeout(() => {
+        user.get("key4").on(data => {
+          assert.equal(data, "value4")
+          user.get("key4").off()
+          done()
+        }, true)
+      }, 100)
     })
   })
 
@@ -119,6 +168,7 @@ describe("holster.user.on", () => {
       key: "plain value",
       number: 42,
     }
+
     user.get("plain").put(plain, err => {
       assert.equal(err, null)
 
@@ -126,6 +176,7 @@ describe("holster.user.on", () => {
         key: "update",
         number: 42,
       }
+
       user.get("plain").on(data => {
         assert.deepEqual(data, update)
         done()
@@ -156,6 +207,7 @@ describe("holster.user.on", () => {
           has: "child update",
         },
       }
+
       user.get("nested").on(data => {
         assert.deepEqual(data, update)
       })
@@ -177,9 +229,11 @@ describe("holster.user.on", () => {
   })
 
   test("cleanup", (t, done) => {
-    fs.rm("test/holster.user.on", {recursive: true, force: true}, err => {
-      assert.equal(err, null)
-      done()
-    })
+    setTimeout(() => {
+      fs.rm("test/holster.user.on", {recursive: true, force: true}, err => {
+        assert.equal(err, null)
+        done()
+      })
+    }, 100)
   })
 })

@@ -14,8 +14,6 @@ const Holster = opt => {
   const map = new Map()
   // Allow concurrent calls to the api by storing each context.
   const allctx = new Map()
-  // Allow user queries by public key
-  let publicKey
 
   const ok = data => {
     return (
@@ -37,21 +35,26 @@ const Holster = opt => {
       const keys = []
       for (const [key, value] of Object.entries(data)) {
         if (key === "_") {
-          return "error underscore cannot be used as an item name"
+          return "error underscore cannot be used as a property name"
         }
         if (utils.obj.is(value) || ok(value)) {
           keys.push(key)
           continue
         }
-        return `error {${key}:${value}} cannot be converted to graph`
+        if (typeof value === "undefined") {
+          return `error undefined ${key} cannot be converted to a graph`
+        }
+        const error = JSON.stringify({[key]: value})
+        return `error ${error} cannot be converted to a graph`
       }
       if (keys.length !== 0) return keys
     }
-    return `error ${data} cannot be converted to a graph`
+    const error = JSON.stringify(data)
+    return `error ${error} cannot be converted to a graph`
   }
 
   const api = ctxid => {
-    const get = (lex, soul, ack, opt) => {
+    const get = (lex, soul, ack, _opt) => {
       wire.get(
         utils.obj.put(lex, "#", soul),
         async msg => {
@@ -59,6 +62,7 @@ const Holster = opt => {
           if (msg.put && msg.put[soul]) {
             delete msg.put[soul]._
             delete msg.put[soul][utils.userPublicKey]
+            delete msg.put[soul][utils.userSignature]
             // Resolve any rels on the node before returning to the user.
             for (const key of Object.keys(msg.put[soul])) {
               const id = utils.rel.is(msg.put[soul][key])
@@ -77,19 +81,18 @@ const Holster = opt => {
             ack(null)
           }
         },
-        opt,
+        _opt,
       )
     }
 
-    const graph = async (soul, data, cb) => {
-      if (!cb) cb = console.log
-
-      if (user.is) {
-        const signed = await SEA.sign(data, user.is)
-        return utils.graph(soul, signed.m, signed.s, user.is.pub)
+    const graph = async (soul, data, userctx, cb) => {
+      if (userctx) {
+        const signed = await SEA.sign(data, userctx)
+        return utils.graph(soul, signed.m, signed.s, userctx.pub)
       }
 
       if (opt.secure) {
+        if (!cb) cb = console.log
         cb(`error putting data on ${soul}: user required in secure mode`)
         return null
       }
@@ -99,17 +102,27 @@ const Holster = opt => {
 
     const done = data => {
       const ctx = allctx.get(ctxid)
-      if (ctx && typeof ctx.cb !== "undefined") ctx.cb(data)
-      else if (data) console.log(data)
+      if (ctx && typeof ctx.cb !== "undefined") {
+        // Use a timeout so that the context can be removed before data is
+        // returned to the callback (allows nested get calls).
+        setTimeout(() => ctx.cb(data), 1)
+      } else if (data) {
+        console.log("error no callback for data", data, "ctx", ctx)
+      }
       // A context updated by "on" should only be removed by "off".
       if (ctx && !ctx.on) allctx.delete(ctxid)
     }
 
     const resolve = (request, cb) => {
-      const get = request && typeof request.get !== "undefined"
-      const put = request && typeof request.put !== "undefined"
-      const on = request && typeof request.on !== "undefined"
-      const off = request && typeof request.off !== "undefined"
+      if (!request) {
+        console.log("error resolve request parameter required")
+        return
+      }
+
+      const get = typeof request.get !== "undefined"
+      const put = typeof request.put !== "undefined"
+      const on = typeof request.on !== "undefined"
+      const off = typeof request.off !== "undefined"
 
       let found = false
       const ctx = allctx.get(ctxid)
@@ -124,34 +137,45 @@ const Holster = opt => {
         // Found a soul that needs resolving, need the previous context
         // (ie the parent node) to find a soul relation for it.
         const {item, soul} = ctx.chain[i - 1]
-        wire.get({"#": soul, ".": item}, async msg => {
+        // If this is a user context or using secure mode then need to get the
+        // whole node for verification.
+        const lex =
+          ctx.user || opt.secure ? {"#": soul} : {"#": soul, ".": item}
+        wire.get(lex, async msg => {
           if (msg.err) {
-            console.log(`error getting ${item} on ${soul}: ${msg.err}`)
+            if (ctx.user || opt.secure) {
+              console.log(`error getting ${soul}: ${msg.err}`)
+            } else {
+              console.log(`error getting ${item} on ${soul}: ${msg.err}`)
+            }
             if (cb) cb(null)
             return
           }
 
-          const node = msg.put && msg.put[soul]
+          let node = msg.put && msg.put[soul]
           if (node && typeof node[item] !== "undefined") {
             let id = utils.rel.is(node[item])
             if (id) {
               ctx.chain[i].soul = id
-              // Not sure why the map needs to be set rather than just ctx?
-              allctx.set(ctxid, {chain: ctx.chain, cb: ctx.cb})
+              allctx.set(ctxid, {...ctx})
               // Call api again using the updated context.
-              if (get) api(ctxid).next(null, request.get, cb)
-              else if (put) api(ctxid).put(request.put, cb)
-              else if (on) api(ctxid).on(request.on, cb)
-              else if (off) api(ctxid).off(cb)
+              if (get) {
+                api(ctxid).next(null, request.get, cb, request._opt)
+              } else if (put) {
+                api(ctxid).put(request.put, cb)
+              } else if (on) {
+                api(ctxid).on(request.on, cb, request._get, request._opt)
+              } else if (off) {
+                api(ctxid).off(cb)
+              }
             } else if (get) {
-              // Request was not for a node, return a property on the current
-              // soul.
+              // Request was not for a node, return property on current soul.
               cb(node[item])
             } else if (put) {
               // Request was chained before put, so rel doesn't exist yet.
               id = utils.text.random()
-              const rel = {[item]: utils.rel.ify(id)}
-              const g = await graph(soul, rel, cb)
+              node[item] = utils.rel.ify(id)
+              const g = await graph(soul, node, ctx.user, cb)
               if (g === null) return
 
               wire.put(g, err => {
@@ -164,16 +188,31 @@ const Holster = opt => {
                 api(ctxid).put(request.put, cb)
               })
             } else if (on) {
-              console.log(`error resolving on for ${item} on ${soul}`)
+              // Allow listening to a node that doesn't exist.
               cb(null)
             } else if (off) {
-              console.log(`error resolving off for ${item} on ${soul}`)
+              // Allow stop listening to a node that doesn't exist.
               if (cb) cb(null)
             }
           } else if (put) {
-            cb(`error ${item} not found on ${soul}`)
+            // Request was chained before put, so rel doesn't exist yet.
+            const id = utils.text.random()
+            if (!node) node = {}
+            node[item] = utils.rel.ify(id)
+            const g = await graph(soul, node, ctx.user, cb)
+            if (g === null) return
+
+            wire.put(g, err => {
+              if (err) {
+                cb(`error putting ${item} on ${soul}: ${err}`)
+                return
+              }
+
+              ctx.chain[i].soul = id
+              api(ctxid).put(request.put, cb)
+            })
           } else {
-            console.log(`error ${item} not found on ${soul}`)
+            // Allow querying a node that doesn't exist.
             if (cb) cb(null)
           }
         })
@@ -195,41 +234,40 @@ const Holster = opt => {
     }
 
     return {
-      get: (key, lex, cb, opt) => {
+      get: (key, lex, cb, _opt) => {
         if (typeof lex === "function") {
+          _opt = cb
           cb = lex
           lex = null
         }
         if (key === null || key === "" || key === "_") {
+          console.log("error please provide a key")
           if (cb) cb(null)
           return
         }
 
         // lex requires a callback as it's not included in the chain below.
-        if (lex && !cb) {
+        if (lex && typeof cb !== "function") {
           console.log("error lex requires a callback function")
           return
         }
 
         // Top level keys are added to a root node so their values don't need
-        // to be objects, the user's public key is used as the root node when
-        // publicKey or user.ctx is set.
-        const root = publicKey ? publicKey : user.ctx ? user.ctx : "root"
-
+        // to be objects.
         ctxid = utils.text.random()
-        allctx.set(ctxid, {chain: [{item: key, soul: root}], cb: cb})
+        allctx.set(ctxid, {chain: [{item: key, soul: "root"}], cb: cb})
         if (!cb) return api(ctxid)
 
         // When there's a callback need to resolve the context first.
-        const {soul} = resolve({get: lex}, done)
-        if (soul) get(lex, soul, done, opt)
+        const {soul} = resolve({get: lex, _opt: _opt}, done)
+        if (soul) get(lex, soul, done, _opt)
       },
-      next: (key, lex, cb, opt) => {
+      next: (key, lex, cb, _opt) => {
         const ack = data => {
           cb ? cb(data) : done(data)
         }
-
         if (typeof lex === "function") {
+          _opt = cb
           cb = lex
           lex = null
         }
@@ -245,7 +283,7 @@ const Holster = opt => {
         }
 
         // lex requires a callback as it's not included in the chain below.
-        if (lex && !cb) {
+        if (lex && typeof cb !== "function") {
           console.log("error lex requires a callback function")
           return
         }
@@ -266,8 +304,8 @@ const Holster = opt => {
         if (!ctx.cb) return api(ctxid)
 
         // When there's a callback need to resolve the context first.
-        const {soul} = resolve({get: lex}, ack)
-        if (soul) get(lex, soul, ack, opt)
+        const {soul} = resolve({get: lex, _opt: _opt}, ack)
+        if (soul) get(lex, soul, ack, _opt)
       },
       put: (data, set, cb) => {
         if (typeof set === "function") {
@@ -311,17 +349,23 @@ const Holster = opt => {
           // When result is true data is a property to put on the current soul.
           // Need to check if item is a rel and also set the node to null. (This
           // applies for any update from a rel to a property, not just null.)
-          wire.get({"#": soul, ".": item}, async msg => {
+          // If using secure mode need to get the whole node for verification.
+          const lex =
+            ctx.user || opt.secure ? {"#": soul} : {"#": soul, ".": item}
+          wire.get(lex, async msg => {
             if (msg.err) {
-              console.log(`error getting ${soul}: ${msg.err}`)
+              ack(`error getting ${soul}: ${msg.err}`)
               return
             }
 
-            const current = msg.put && msg.put[soul] && msg.put[soul][item]
+            let node = msg.put && msg.put[soul]
+            const current = node && node[item]
             const id = utils.rel.is(current)
             if (!id) {
               // Not a rel, can just put the data.
-              const g = await graph(soul, {[item]: data}, ack)
+              if (!node) node = {}
+              node[item] = data
+              const g = await graph(soul, node, ctx.user, ack)
               if (g === null) return
 
               wire.put(g, ack)
@@ -330,23 +374,29 @@ const Holster = opt => {
 
             wire.get({"#": id}, async msg => {
               if (msg.err) {
-                console.log(`error getting ${id}: ${msg.err}`)
+                ack(`error getting ${id}: ${msg.err}`)
                 return
               }
 
               if (!msg.put || !msg.put[id]) {
-                console.log(`error ${id} not found`)
+                ack(`error ${id} not found`)
                 return
               }
 
-              delete msg.put[id]._
               // null each of the properties on the node before putting data.
               for (const key of Object.keys(msg.put[id])) {
-                if (key === utils.userPublicKey) continue
+                if (
+                  key === "_" ||
+                  key === utils.userPublicKey ||
+                  key === utils.userSignature
+                ) {
+                  continue
+                }
 
                 const err = await new Promise(res => {
                   const _ctxid = utils.text.random()
-                  allctx.set(_ctxid, {chain: [{item: key, soul: id}]})
+                  const chain = [{item: key, soul: id}]
+                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
                   api(_ctxid).put(null, res)
                 })
                 if (err) {
@@ -354,7 +404,9 @@ const Holster = opt => {
                   return
                 }
               }
-              const g = await graph(soul, {[item]: data}, ack)
+              if (!node) node = {}
+              node[item] = data
+              const g = await graph(soul, node, ctx.user, ack)
               if (g === null) return
 
               wire.put(g, ack)
@@ -365,18 +417,23 @@ const Holster = opt => {
 
         // Otherwise put the data using the keys returned in result.
         // Need to check if a rel has already been added on the current node.
-        wire.get({"#": soul, ".": item}, async msg => {
+        // If using secure mode need to get the whole node for verification.
+        const lex =
+          ctx.user || opt.secure ? {"#": soul} : {"#": soul, ".": item}
+        wire.get(lex, async msg => {
           if (msg.err) {
             ack(`error getting ${soul}.${item}: ${msg.err}`)
             return
           }
 
-          const current = msg.put && msg.put[soul] && msg.put[soul][item]
+          let node = msg.put && msg.put[soul]
+          const current = node && node[item]
           const id = utils.rel.is(current)
           if (!id) {
             // The current rel doesn't exist, so add it first.
-            const rel = {[item]: utils.rel.ify(utils.text.random())}
-            const g = await graph(soul, rel, ack)
+            if (!node) node = {}
+            node[item] = utils.rel.ify(utils.text.random())
+            const g = await graph(soul, node, ctx.user, ack)
             if (g === null) return
 
             wire.put(g, err => {
@@ -385,27 +442,26 @@ const Holster = opt => {
               } else {
                 const _ctxid = utils.text.random()
                 const chain = [{item: item, soul: soul}]
-                // Pass the previous context's callback on here.
-                allctx.set(_ctxid, {chain: chain, cb: ctx.cb})
+                // Pass on the previous context's callback and user flag here.
+                allctx.set(_ctxid, {chain: chain, user: ctx.user, cb: ctx.cb})
                 api(_ctxid).put(data)
               }
             })
             return
           }
 
-          let put = false
-          const update = {}
+          const update = []
           for (const key of result) {
             const err = await new Promise(res => {
-              if (utils.obj.is(data[key])) {
+              if (utils.obj.is(data[key]) && !utils.rel.is(data[key])) {
                 // Use the current rel as the context for nested objects.
                 const _ctxid = utils.text.random()
-                allctx.set(_ctxid, {chain: [{item: key, soul: id}]})
+                const chain = [{item: key, soul: id}]
+                allctx.set(_ctxid, {chain: chain, user: ctx.user})
                 api(_ctxid).put(data[key], res)
               } else {
-                put = true
-                // Group other properties into one update.
-                update[key] = data[key]
+                // Group the rest of the updates for put below.
+                update.push(key)
                 res(null)
               }
             })
@@ -414,23 +470,43 @@ const Holster = opt => {
               return
             }
           }
-          if (put) {
-            const g = await graph(id, update, ack)
+
+          if (update.length === 0) {
+            ack(null)
+            return
+          }
+
+          // The nested objects created above will also have rels on the parent
+          // object, so fetch the node so the rest of the updates can be added.
+          wire.get({"#": id}, async msg => {
+            if (msg.err) {
+              ack(`error getting ${id}: ${msg.err}`)
+              return
+            }
+
+            let node = msg.put && msg.put[id]
+            if (!node) node = {}
+            update.forEach(key => {
+              node[key] = data[key]
+            })
+            const g = await graph(id, node, ctx.user, ack)
             if (g === null) return
 
             wire.put(g, ack)
-          } else {
-            // Callback on behalf of nested objects.
-            ack(null)
-          }
+          })
         })
       },
-      on: (lex, cb) => {
+      on: (lex, cb, _get, _opt) => {
         if (typeof lex === "function") {
+          _opt = _get
+          _get = cb
           cb = lex
           lex = null
         }
-        if (!cb) return
+        if (typeof cb !== "function") {
+          console.log("error on() requires a callback function")
+          return
+        }
 
         if (!ctxid) {
           console.log("error please provide a key using get(key)")
@@ -439,7 +515,7 @@ const Holster = opt => {
         }
 
         // Resolve the current context before adding event listener.
-        const {item, soul} = resolve({on: lex}, cb)
+        const {item, soul} = resolve({on: lex, _get: _get, _opt: _opt}, cb)
         if (!soul) return
 
         // Flag that this context is set from on and shouldn't be removed.
@@ -463,7 +539,7 @@ const Holster = opt => {
             if (lex) lex = utils.obj.put(lex, "#", soul)
             else lex = {"#": soul, ".": item}
           }
-          wire.on(lex, map.get(cb))
+          wire.on(lex, map.get(cb), _get, _opt)
         })
       },
       off: cb => {
@@ -492,14 +568,61 @@ const Holster = opt => {
           allctx.delete(ctxid)
         })
       },
-      user: pub => {
-        // Return the combined Holster and User APIs. Passing in a public key
-        // will set the user context to that key, otherwise user.ctx is set when
-        // a user logs in so that their public key will be used as the root node
-        // in get(), also put() will sign all graph updates for verification.
-        if (pub) publicKey = "~" + pub
-        else publicKey = null
-        return Object.assign(user, api())
+      user: () => {
+        if (!user.get) {
+          // Return the combined Holster and User APIs.
+          Object.assign(user, api())
+          // Need to provide a user specific get() function to know if user
+          // context should be checked.
+          user.get = (keys, lex, cb, _opt) => {
+            if (typeof lex === "function") {
+              _opt = cb
+              cb = lex
+              lex = null
+            }
+
+            let pub = null
+            let key = null
+            if (user.is) pub = user.is.pub
+            if (typeof keys === "string") {
+              key = keys
+            } else if (keys instanceof Array) {
+              if (keys.length === 2) {
+                pub = keys[0]
+                key = keys[1]
+              } else if (keys.length === 1) {
+                key = keys[0]
+              }
+            }
+            if (!pub) {
+              console.log("error please log in or provide a public key")
+              if (cb) cb(null)
+              return
+            }
+
+            if (key === null || key === "" || key === "_") {
+              console.log("error please provide a key")
+              if (cb) cb(null)
+              return
+            }
+
+            // lex requires a callback as it's not included in the chain below.
+            if (lex && !cb) {
+              console.log("error lex requires a callback function")
+              return
+            }
+
+            ctxid = utils.text.random()
+            const chain = [{item: key, soul: "~" + pub}]
+            allctx.set(ctxid, {chain: chain, user: user.is, cb: cb})
+            if (!cb) return api(ctxid)
+
+            // When there's a callback need to resolve the context first.
+            const {soul} = resolve({get: lex}, done)
+            if (soul) get(lex, soul, done, _opt)
+          }
+        }
+        return user
       },
       // Allow the wire spec to be used via holster.
       wire: wire,
