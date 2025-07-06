@@ -71,12 +71,16 @@ describe("holster.put", () => {
     }
 
     setTimeout(() => {
+      let count = 0
       for (let i = 0; i < 5; i++) {
         holster.get("for" + i, data => {
           assert.equal(data, i)
-          if (i === 4) setTimeout(done, 100)
+          count++
         })
       }
+      setTimeout(() => {
+        if (count === 5) done()
+      }, 200)
     }, 200)
   })
 

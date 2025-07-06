@@ -100,17 +100,21 @@ const Holster = opt => {
       return utils.graph(soul, data)
     }
 
-    const done = data => {
-      const ctx = allctx.get(ctxid)
-      if (ctx && typeof ctx.cb !== "undefined") {
-        // Use a timeout so that the context can be removed before data is
-        // returned to the callback (allows nested get calls).
-        setTimeout(() => ctx.cb(data), 1)
-      } else if (data) {
-        console.log("error no callback for data", data, "ctx", ctx)
+    // done takes a context id and returns a new callback function so that the
+    // callback is not overwritten by simultaneous requests.
+    const done = ctxid => {
+      return data => {
+        const ctx = allctx.get(ctxid)
+        if (ctx && typeof ctx.cb !== "undefined") {
+          // Use a timeout so that the context can be removed before data is
+          // returned to the callback (allows nested get calls).
+          setTimeout(() => ctx.cb(data), 1)
+        } else if (data) {
+          console.log("error no callback for data", data, "ctx", ctx)
+        }
+        // A context updated by "on" should only be removed by "off".
+        if (ctx && !ctx.on) allctx.delete(ctxid)
       }
-      // A context updated by "on" should only be removed by "off".
-      if (ctx && !ctx.on) allctx.delete(ctxid)
     }
 
     const resolve = (request, cb) => {
@@ -258,13 +262,22 @@ const Holster = opt => {
         allctx.set(ctxid, {chain: [{item: key, soul: "root"}], cb: cb})
         if (!cb) return api(ctxid)
 
+        const _done = done(ctxid)
         // When there's a callback need to resolve the context first.
-        const {soul} = resolve({get: lex, _opt: _opt}, done)
-        if (soul) get(lex, soul, done, _opt)
+        const {soul} = resolve({get: lex, _opt: _opt}, _done)
+        if (soul) get(lex, soul, _done, _opt)
       },
       next: (key, lex, cb, _opt) => {
-        const ack = data => {
-          cb ? cb(data) : done(data)
+        // ack needs to work the same as done, pass it the context id and then
+        // return a new function for the actual callback.
+        const ack = ctxid => {
+          return data => {
+            if (cb) {
+              cb(data)
+            } else {
+              done(ctxid)(data)
+            }
+          }
         }
         if (typeof lex === "function") {
           _opt = cb
@@ -273,12 +286,13 @@ const Holster = opt => {
         }
         if (!ctxid) {
           console.log("error please provide a key using get(key)")
-          ack(null)
+          if (cb) cb(null)
           return
         }
 
+        const _ack = ack(ctxid)
         if (key === "" || key === "_") {
-          ack(null)
+          _ack(null)
           return
         }
 
@@ -304,20 +318,25 @@ const Holster = opt => {
         if (!ctx.cb) return api(ctxid)
 
         // When there's a callback need to resolve the context first.
-        const {soul} = resolve({get: lex, _opt: _opt}, ack)
-        if (soul) get(lex, soul, ack, _opt)
+        const {soul} = resolve({get: lex, _opt: _opt}, _ack)
+        if (soul) get(lex, soul, _ack, _opt)
       },
       put: (data, set, cb) => {
         if (typeof set === "function") {
           cb = set
           set = false
         }
-        const ack = err => {
-          cb ? cb(err) : done(err)
+        const ack = ctxid => {
+          return data => {
+            if (cb) {
+              cb(data)
+            } else {
+              done(ctxid)(data)
+            }
+          }
         }
-
         if (!ctxid) {
-          ack("please provide a key using get(key)")
+          if (cb) cb("error please provide a key using get(key)")
           return
         }
 
@@ -334,15 +353,16 @@ const Holster = opt => {
         }
         if (set) data = {[utils.text.random()]: data}
 
+        const _ack = ack(ctxid)
         const result = check(data)
         if (typeof result === "string") {
           // All strings returned from check are errors, cannot continue.
-          ack(result)
+          _ack(result)
           return
         }
 
         // Resolve the current context before putting data.
-        const {item, soul} = resolve({put: data}, ack)
+        const {item, soul} = resolve({put: data}, _ack)
         if (!soul) return
 
         if (result === true) {
@@ -354,7 +374,7 @@ const Holster = opt => {
             ctx.user || opt.secure ? {"#": soul} : {"#": soul, ".": item}
           wire.get(lex, async msg => {
             if (msg.err) {
-              ack(`error getting ${soul}: ${msg.err}`)
+              _ack(`error getting ${soul}: ${msg.err}`)
               return
             }
 
@@ -365,21 +385,21 @@ const Holster = opt => {
               // Not a rel, can just put the data.
               if (!node) node = {}
               node[item] = data
-              const g = await graph(soul, node, ctx.user, ack)
+              const g = await graph(soul, node, ctx.user, _ack)
               if (g === null) return
 
-              wire.put(g, ack)
+              wire.put(g, _ack)
               return
             }
 
             wire.get({"#": id}, async msg => {
               if (msg.err) {
-                ack(`error getting ${id}: ${msg.err}`)
+                _ack(`error getting ${id}: ${msg.err}`)
                 return
               }
 
               if (!msg.put || !msg.put[id]) {
-                ack(`error ${id} not found`)
+                _ack(`error ${id} not found`)
                 return
               }
 
@@ -400,16 +420,16 @@ const Holster = opt => {
                   api(_ctxid).put(null, res)
                 })
                 if (err) {
-                  ack(err)
+                  _ack(err)
                   return
                 }
               }
               if (!node) node = {}
               node[item] = data
-              const g = await graph(soul, node, ctx.user, ack)
+              const g = await graph(soul, node, ctx.user, _ack)
               if (g === null) return
 
-              wire.put(g, ack)
+              wire.put(g, _ack)
             })
           })
           return
@@ -422,7 +442,7 @@ const Holster = opt => {
           ctx.user || opt.secure ? {"#": soul} : {"#": soul, ".": item}
         wire.get(lex, async msg => {
           if (msg.err) {
-            ack(`error getting ${soul}.${item}: ${msg.err}`)
+            _ack(`error getting ${soul}.${item}: ${msg.err}`)
             return
           }
 
@@ -433,12 +453,12 @@ const Holster = opt => {
             // The current rel doesn't exist, so add it first.
             if (!node) node = {}
             node[item] = utils.rel.ify(utils.text.random())
-            const g = await graph(soul, node, ctx.user, ack)
+            const g = await graph(soul, node, ctx.user, _ack)
             if (g === null) return
 
             wire.put(g, err => {
               if (err) {
-                ack(`error putting ${item} on ${soul}: ${err}`)
+                _ack(`error putting ${item} on ${soul}: ${err}`)
               } else {
                 const _ctxid = utils.text.random()
                 const chain = [{item: item, soul: soul}]
@@ -466,13 +486,13 @@ const Holster = opt => {
               }
             })
             if (err) {
-              ack(err)
+              _ack(err, ctxid)
               return
             }
           }
 
           if (update.length === 0) {
-            ack(null)
+            _ack(null)
             return
           }
 
@@ -480,7 +500,7 @@ const Holster = opt => {
           // object, so fetch the node so the rest of the updates can be added.
           wire.get({"#": id}, async msg => {
             if (msg.err) {
-              ack(`error getting ${id}: ${msg.err}`)
+              _ack(`error getting ${id}: ${msg.err}`)
               return
             }
 
@@ -489,10 +509,10 @@ const Holster = opt => {
             update.forEach(key => {
               node[key] = data[key]
             })
-            const g = await graph(id, node, ctx.user, ack)
+            const g = await graph(id, node, ctx.user, _ack)
             if (g === null) return
 
-            wire.put(g, ack)
+            wire.put(g, _ack)
           })
         })
       },
@@ -618,8 +638,9 @@ const Holster = opt => {
             if (!cb) return api(ctxid)
 
             // When there's a callback need to resolve the context first.
-            const {soul} = resolve({get: lex}, done)
-            if (soul) get(lex, soul, done, _opt)
+            const _done = done(ctxid)
+            const {soul} = resolve({get: lex}, _done)
+            if (soul) get(lex, soul, _done, _opt)
           }
         }
         return user
