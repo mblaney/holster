@@ -101,11 +101,12 @@ describe("holster.user.on", () => {
 
     // Need to wait until after all initial puts are done to set on listeners.
     setTimeout(async () => {
+      let count = 0
       for (let i = 0; i < 5; i++) {
         user.get("for" + i).on(data => {
           assert.equal(data, "update" + i)
           user.get("for" + i).off()
-          if (i === 4) done()
+          count++
         })
       }
 
@@ -117,6 +118,9 @@ describe("holster.user.on", () => {
           })
           assert.equal(err, null)
         }
+        setTimeout(() => {
+          if (count === 5) done()
+        }, 500)
       }, 500)
     }, 1000)
   })

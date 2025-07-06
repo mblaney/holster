@@ -63,11 +63,10 @@ Ham.mix = async (change, graph, secure, listen) => {
       }
     }
     if (verify) {
-      // Partial nodes can be read from disk, just ignore them.
-      if (!sig || !pub) continue
-
-      if (!(await SEA.verify({m: node, s: sig}, {pub: pub}))) {
-        console.log(`error could not verify soul: ${soul}`)
+      // Partial nodes can be read from disk, which are ignored. This could be
+      // a missing signature or public key, or missing properties on the node
+      // which means verify won't work either.
+      if (!sig || !pub || !(await SEA.verify({m: node, s: sig}, {pub: pub}))) {
         continue
       }
     }

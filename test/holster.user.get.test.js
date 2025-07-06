@@ -63,12 +63,16 @@ describe("holster.user.get", () => {
   })
 
   test("get unknown keys in for loop callbacks null", (t, done) => {
+    let count = 0
     for (let i = 0; i < 5; i++) {
       user.get("unknown" + i, data => {
         assert.equal(data, null)
-        if (i === 4) done()
+        count++
       })
     }
+    setTimeout(() => {
+      if (count === 5) done()
+    }, 200)
   })
 
   test("nested get unknown key callback null", (t, done) => {
