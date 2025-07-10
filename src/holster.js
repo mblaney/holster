@@ -229,7 +229,7 @@ const Holster = opt => {
         // The context has been resolved but it does not include the requested
         // node, which requires one more lookup.
         ctx.chain.push({item: null, soul: null})
-        api(ctxid).next(null, request.get, cb)
+        api(ctxid).next(null, request.get, cb, request._opt)
         return false
       }
 
@@ -361,7 +361,8 @@ const Holster = opt => {
           return
         }
 
-        // Resolve the current context before putting data.
+        // Resolve the current context before putting data. (Note that set is
+        // not passed to resolve because it's already been applied above.)
         const {item, soul} = resolve({put: data}, _ack)
         if (!soul) return
 
@@ -639,7 +640,7 @@ const Holster = opt => {
 
             // When there's a callback need to resolve the context first.
             const _done = done(ctxid)
-            const {soul} = resolve({get: lex}, _done)
+            const {soul} = resolve({get: lex, _opt: _opt}, _done)
             if (soul) get(lex, soul, _done, _opt)
           }
         }
