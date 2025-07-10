@@ -27,53 +27,57 @@ const User = (opt, wire) => {
       }
 
       const pub = pubs.shift()
-      wire.get({"#": pub}, async msg => {
-        if (msg.err) {
-          done(`error getting ${pub}: ${msg.err}`)
-          return
-        }
+      wire.get(
+        {"#": pub},
+        async msg => {
+          if (msg.err) {
+            done(`error getting ${pub}: ${msg.err}`)
+            return
+          }
 
-        const data = msg.put && msg.put[pub]
-        if (!data || !data.auth) return next()
+          const data = msg.put && msg.put[pub]
+          if (!data || !data.auth) return next()
 
-        const auth = JSON.parse(data.auth)
-        const work = await SEA.work(password, auth.salt)
-        const dec = await SEA.decrypt(auth.enc, work)
-        if (!dec) return next()
+          const auth = JSON.parse(data.auth)
+          const work = await SEA.work(password, auth.salt)
+          const dec = await SEA.decrypt(auth.enc, work)
+          if (!dec) return next()
 
-        user.is = {
-          username: username,
-          pub: data.pub,
-          epub: data.epub,
-          priv: dec.priv,
-          epriv: dec.epriv,
-        }
-        if (newPassword !== "") {
-          // Encrypt private key using new password and a new salt.
-          const salt = utils.text.random(64)
-          const work = await SEA.work(newPassword, salt)
-          const enc = await SEA.encrypt(dec, work)
-          // Put all fields so that verification applies to the whole node.
-          const update = {
+          user.is = {
             username: username,
             pub: data.pub,
             epub: data.epub,
-            auth: JSON.stringify({enc: enc, salt: salt}),
+            priv: dec.priv,
+            epriv: dec.epriv,
           }
-          const signed = await SEA.sign(update, user.is)
-          const graph = utils.graph(pub, signed.m, signed.s, data.pub)
-          wire.put(graph, err => {
-            if (err) {
-              done(`error putting ${update} on ${pub}: ${err}`)
-            } else {
-              done(null)
+          if (newPassword !== "") {
+            // Encrypt private key using new password and a new salt.
+            const salt = utils.text.random(64)
+            const work = await SEA.work(newPassword, salt)
+            const enc = await SEA.encrypt(dec, work)
+            // Put all fields so that verification applies to the whole node.
+            const update = {
+              username: username,
+              pub: data.pub,
+              epub: data.epub,
+              auth: JSON.stringify({enc: enc, salt: salt}),
             }
-          })
-          return
-        }
+            const signed = await SEA.sign(update, user.is)
+            const graph = utils.graph(pub, signed.m, signed.s, data.pub)
+            wire.put(graph, err => {
+              if (err) {
+                done(`error putting ${update} on ${pub}: ${err}`)
+              } else {
+                done(null)
+              }
+            })
+            return
+          }
 
-        return done(null)
-      })
+          return done(null)
+        },
+        {wait: 1000},
+      )
     }
 
     if (retries > 9) {
@@ -82,21 +86,25 @@ const User = (opt, wire) => {
     }
 
     const soul = "~@" + username
-    wire.get({"#": soul}, async msg => {
-      if (msg.err) {
-        done(`error getting ${soul}: ${msg.err}`)
-        return
-      }
+    wire.get(
+      {"#": soul},
+      async msg => {
+        if (msg.err) {
+          done(`error getting ${soul}: ${msg.err}`)
+          return
+        }
 
-      const data = msg.put && msg.put[soul]
-      if (!data) return retry(username)
+        const data = msg.put && msg.put[soul]
+        if (!data) return retry(username)
 
-      delete msg.put[soul]._
-      // Usernames aren't guaranteed to be unique, so store the list and then
-      // try each of them until one is successful with the given password.
-      pubs = Object.keys(data)
-      next()
-    })
+        delete msg.put[soul]._
+        // Usernames aren't guaranteed to be unique, so store the list and then
+        // try each of them until one is successful with the given password.
+        pubs = Object.keys(data)
+        next()
+      },
+      {wait: 1000},
+    )
   }
 
   const user = {
@@ -124,53 +132,57 @@ const User = (opt, wire) => {
       creating = true
 
       const soul = "~@" + username
-      wire.get({"#": soul}, async msg => {
-        if (msg.err) {
-          creating = false
-          ack(`error getting ${soul}: ${msg.err}`)
-          return
-        }
-
-        if (msg.put && msg.put[soul]) {
-          creating = false
-          ack("Username already exists")
-          return
-        }
-
-        const salt = utils.text.random(64)
-        const work = await SEA.work(password, salt)
-        const pair = await SEA.pair()
-        const priv = {priv: pair.priv, epriv: pair.epriv}
-        const enc = await SEA.encrypt(priv, work)
-        const data = {
-          username: username,
-          pub: pair.pub,
-          epub: pair.epub,
-          auth: JSON.stringify({enc: enc, salt: salt}),
-        }
-
-        const pub = "~" + pair.pub
-        const signed = await SEA.sign(data, pair)
-        const graph = utils.graph(pub, signed.m, signed.s, pair.pub)
-        wire.put(graph, err => {
-          creating = false
-          if (err) {
-            ack(`error putting ${data} on ${pub}: ${err}`)
+      wire.get(
+        {"#": soul},
+        async msg => {
+          if (msg.err) {
+            creating = false
+            ack(`error getting ${soul}: ${msg.err}`)
             return
           }
 
-          const rel = {[pub]: {"#": pub}}
-          wire.put(utils.graph(soul, rel), err => {
+          if (msg.put && msg.put[soul]) {
+            creating = false
+            ack("Username already exists")
+            return
+          }
+
+          const salt = utils.text.random(64)
+          const work = await SEA.work(password, salt)
+          const pair = await SEA.pair()
+          const priv = {priv: pair.priv, epriv: pair.epriv}
+          const enc = await SEA.encrypt(priv, work)
+          const data = {
+            username: username,
+            pub: pair.pub,
+            epub: pair.epub,
+            auth: JSON.stringify({enc: enc, salt: salt}),
+          }
+
+          const pub = "~" + pair.pub
+          const signed = await SEA.sign(data, pair)
+          const graph = utils.graph(pub, signed.m, signed.s, pair.pub)
+          wire.put(graph, err => {
+            creating = false
             if (err) {
-              ack(`error putting ${rel} on ${soul}: ${err}`)
+              ack(`error putting ${data} on ${pub}: ${err}`)
               return
             }
 
-            // Return null on success.
-            if (cb) cb(null)
+            const rel = {[pub]: {"#": pub}}
+            wire.put(utils.graph(soul, rel), err => {
+              if (err) {
+                ack(`error putting ${rel} on ${soul}: ${err}`)
+                return
+              }
+
+              // Return null on success.
+              if (cb) cb(null)
+            })
           })
-        })
-      })
+        },
+        {wait: 1000},
+      )
     },
     auth: (username, password, cb) => {
       const ack = err => {
