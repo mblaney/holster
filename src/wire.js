@@ -220,8 +220,22 @@ const Wire = opt => {
 
     const send = (data, isBinary) => {
       clients().forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
+        if (client && client.readyState === WebSocket.OPEN) {
           client.send(data, {binary: isBinary})
+        } else {
+          let retry = 0
+          const interval = setInterval(() => {
+            if (client && client.readyState === WebSocket.OPEN) {
+              clearInterval(interval)
+              client.send(data, {binary: isBinary})
+              return
+            }
+
+            if (retry++ > 5) {
+              clearInterval(interval)
+              console.log("websocket not available")
+            }
+          }, 1000)
         }
       })
     }
@@ -257,7 +271,19 @@ const Wire = opt => {
       if (peer && peer.readyState === WebSocket.OPEN) {
         peer.send(data)
       } else {
-        console.log("websocket not available")
+        let retry = 0
+        const interval = setInterval(() => {
+          if (peer && peer.readyState === WebSocket.OPEN) {
+            clearInterval(interval)
+            peer.send(data)
+            return
+          }
+
+          if (retry++ > 5) {
+            clearInterval(interval)
+            console.log("websocket not available")
+          }
+        }, 1000)
       }
     })
   }
@@ -265,10 +291,9 @@ const Wire = opt => {
     opt.peers = [`ws://localhost:${opt.port || 8765}`]
   }
   opt.peers.forEach(peer => {
-    let ws = new WebSocket(peer)
-    peers.push(ws)
     const start = () => {
-      if (!ws) ws = new WebSocket(peer)
+      let ws = new WebSocket(peer)
+      peers.push(ws)
       ws.onclose = c => {
         if (peers.indexOf(ws) !== -1) {
           peers.splice(peers.indexOf(ws), 1)
