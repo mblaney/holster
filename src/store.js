@@ -35,11 +35,11 @@ const fileSystem = opt => {
         })
       },
       put: (file, data, cb) => {
-        var random = Math.random().toString(36).slice(-9)
         // Don't put tmp files under dir so that they're not listed.
-        var tmp = file + "." + random + ".tmp"
+        var tmp = file + "." + utils.text.random(9) + ".tmp"
         fs.writeFile(tmp, data, err => {
           if (err) {
+            console.log("fs.writeFile error:", err)
             cb(err)
             return
           }
@@ -90,7 +90,7 @@ const fileSystem = opt => {
 
     return {
       get: (file, cb) => {
-        if (db) {
+        const _get = (file, cb) => {
           const tx = db.transaction([dir], "readonly")
           const req = tx.objectStore(dir).get(file)
           req.onerror = () => {
@@ -99,12 +99,28 @@ const fileSystem = opt => {
           req.onsuccess = () => {
             cb(null, req.result)
           }
-        } else {
-          cb("error indexedDB not available")
         }
+        if (db) {
+          _get(file, cb)
+          return
+        }
+
+        let retry = 0
+        const interval = setInterval(() => {
+          if (db) {
+            clearInterval(interval)
+            _get(file, cb)
+            return
+          }
+
+          if (retry++ > 5) {
+            clearInterval(interval)
+            cb("error indexedDB not available")
+          }
+        }, 1000)
       },
       put: (file, data, cb) => {
-        if (db) {
+        const _put = (file, data, cb) => {
           const tx = db.transaction([dir], "readwrite")
           const req = tx.objectStore(dir).put(data, file)
           req.onerror = () => {
@@ -113,12 +129,28 @@ const fileSystem = opt => {
           req.onsuccess = () => {
             cb(null)
           }
-        } else {
-          cb("error indexedDB not available")
         }
+        if (db) {
+          _put(file, data, cb)
+          return
+        }
+
+        let retry = 0
+        const interval = setInterval(() => {
+          if (db) {
+            clearInterval(interval)
+            _put(file, data, cb)
+            return
+          }
+
+          if (retry++ > 5) {
+            clearInterval(interval)
+            cb("error indexedDB not available")
+          }
+        }, 1000)
       },
       list: cb => {
-        if (db) {
+        const _list = cb => {
           const tx = db.transaction([dir], "readonly")
           const req = tx.objectStore(dir).getAllKeys()
           req.onerror = () => console.log("error getting keys for", dir)
@@ -126,10 +158,26 @@ const fileSystem = opt => {
             req.result.forEach(cb)
             cb()
           }
-        } else {
-          console.log("error indexedDB not available")
-          cb()
         }
+        if (db) {
+          _list(cb)
+          return
+        }
+
+        let retry = 0
+        const interval = setInterval(() => {
+          if (db) {
+            clearInterval(interval)
+            _list(cb)
+            return
+          }
+
+          if (retry++ > 5) {
+            clearInterval(interval)
+            console.log("error indexedDB not available")
+            cb()
+          }
+        }, 1000)
       },
     }
   }
