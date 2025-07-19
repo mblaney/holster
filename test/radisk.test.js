@@ -25,6 +25,8 @@ describe("radisk", () => {
     },
   }
   const radisk = Radisk(opt)
+  const big =
+    "file size is only 100 bytes so writing this value requires calling slice"
 
   test("write and read from memory", (t, done) => {
     radisk("key", "value", () => {
@@ -164,8 +166,6 @@ describe("radisk", () => {
   })
 
   test("write and read value bigger than file size", (t, done) => {
-    const big =
-      "file size is only 100 bytes so writing this value requires calling slice"
     radisk("newFile", big)
     radisk("newFile", (err, value) => {
       assert.equal(value, big)
@@ -175,17 +175,160 @@ describe("radisk", () => {
         "!":
           '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
-          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
-          '\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n',
-        keyC:
-          '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n' +
-          '\x1F+0\x1F#\x1F"newFile\x1F=\x1F \x1F\n',
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
+        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"' + big + "\x1F\n",
       })
       radisk("newFile", (err, value) => {
         assert.equal(value, big)
         done()
       })
+    }, 10)
+  })
+
+  // This tests trying to add to a file that is already too long, so needs to
+  // split again. Previously wasn't able to do this and would loop.
+  test("write and read a small value after split", (t, done) => {
+    radisk("small", "small value")
+    radisk("small", (err, value) => {
+      assert.equal(value, "small value")
+    })
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!":
+          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
+          '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
+        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+        newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"' + big + "\x1F\n",
+        small: '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n',
+      })
+      done()
+    }, 10)
+  })
+
+  // This tests how existing files are handled when they are made smaller than
+  // the maximum file size. (They should be kept as they are created so that
+  // we don't have to deal with removing files.)
+  test("write small value to newFile", (t, done) => {
+    radisk("newFile", "removed...")
+    radisk("newFile", (err, value) => {
+      assert.equal(value, "removed...")
+    })
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!":
+          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
+          '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
+        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+        newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
+        small: '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n',
+      })
+      done()
+    }, 10)
+  })
+
+  // This tests ignoring the maximum file size when writing sub-keys. Since
+  // radisk.write has already been called for a key it would previously get
+  // duplicated when trying to split due to reaching the max length.
+  test("write big value to first file", (t, done) => {
+    radisk("keyA", big)
+    radisk("keyA", (err, value) => {
+      assert.equal(value, big)
+    })
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!":
+          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
+          '\x1F+1\x1F#\x1F"A\x1F=\x1F"' +
+          big +
+          "\x1F\n" +
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
+        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+        newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
+        small: '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n',
+      })
+      done()
+    }, 10)
+  })
+
+  test("add to last file", (t, done) => {
+    radisk("smallContinued", "continued value")
+    radisk("smallContinued", (err, value) => {
+      assert.equal(value, "continued value")
+    })
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!":
+          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
+          '\x1F+1\x1F#\x1F"A\x1F=\x1F"' +
+          big +
+          "\x1F\n" +
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
+        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+        newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
+        small:
+          '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n' +
+          '\x1F+1\x1F#\x1F"Continued\x1F=\x1F"continued value\x1F\n',
+      })
+      done()
+    }, 10)
+  })
+
+  test("set a key to null and add a value to that file", (t, done) => {
+    radisk("keyC", null)
+    radisk("keyC", (err, value) => {
+      assert.equal(value, null)
+    })
+    radisk("keyD", "valueD")
+    radisk("keyD", (err, value) => {
+      assert.equal(value, "valueD")
+    })
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!":
+          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
+          '\x1F+1\x1F#\x1F"A\x1F=\x1F"' +
+          big +
+          "\x1F\n" +
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
+        keyC:
+          '\x1F+0\x1F#\x1F"key\x1F\n\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n' +
+          '\x1F+1\x1F#\x1F"D\x1F=\x1F"valueD\x1F\n',
+        newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
+        small:
+          '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n' +
+          '\x1F+1\x1F#\x1F"Continued\x1F=\x1F"continued value\x1F\n',
+      })
+      done()
+    }, 10)
+  })
+
+  test("set first keys to null", (t, done) => {
+    radisk("key", null)
+    radisk("key", (err, value) => {
+      assert.equal(value, null)
+    })
+    radisk("keyA", null)
+    radisk("keyA", (err, value) => {
+      assert.equal(value, null)
+    })
+    setTimeout(() => {
+      assert.deepEqual(puts, {
+        "!":
+          '\x1F+0\x1F#\x1F"key\x1F=\x1F \x1F\n' +
+          '\x1F+1\x1F#\x1F"A\x1F=\x1F \x1F\n' +
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
+        keyC:
+          '\x1F+0\x1F#\x1F"key\x1F\n\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n' +
+          '\x1F+1\x1F#\x1F"D\x1F=\x1F"valueD\x1F\n',
+        newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
+        small:
+          '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n' +
+          '\x1F+1\x1F#\x1F"Continued\x1F=\x1F"continued value\x1F\n',
+      })
+      done()
     }, 10)
   })
 })

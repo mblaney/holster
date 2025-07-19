@@ -75,7 +75,7 @@ describe("store", () => {
       },
       err => {
         assert.equal(err, null)
-        fs.access("test/multiple/keyC", err => {
+        fs.access("test/multiple/!", err => {
           assert.equal(err, null)
           fs.access("test/multiple/newFile", err => {
             assert.equal(err, null)
@@ -103,7 +103,7 @@ describe("store", () => {
     })
   })
 
-  test("get keys from second file", (t, done) => {
+  test("get another key from first file", (t, done) => {
     multiple.get({"#": "keyC"}, (err, value) => {
       assert.deepEqual(value, {
         keyC: {
@@ -135,7 +135,7 @@ describe("store", () => {
     })
   })
 
-  test("get key from third file", (t, done) => {
+  test("get key from second file", (t, done) => {
     multiple.get({"#": "newFile"}, (err, value) => {
       assert.deepEqual(value, {
         newFile: {
