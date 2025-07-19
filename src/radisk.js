@@ -135,11 +135,12 @@ const Radisk = opt => {
           save.end = file
           // ! is used as the first file name as it's the first printable
           // character, so always matches as lexically less than any node.
-          save.mix(save.file || "!", save.start, save.end)
-          return true
+          // Also save.start can be set to undefined by a previous call to
+          // save.mix, so don't continue in this case.
+          if (save.start) save.mix(save.file || "!", save.start, save.end)
+        } else {
+          save.file = file
         }
-
-        save.file = file
       },
       mix: (file, start, end) => {
         save.start = save.end = save.file = u
@@ -151,7 +152,7 @@ const Radisk = opt => {
 
             if (end && end < key) {
               save.start = key
-              return save.start
+              return
             }
 
             disk(key, value)
@@ -185,8 +186,13 @@ const Radisk = opt => {
           Radisk.encode(k) +
           (typeof value === "undefined" ? "" : "=" + Radisk.encode(value)) +
           "\n"
-        // Cannot split the file if only have one entry to write.
-        if (write.count > 1 && write.text.length + enc.length > opt.size) {
+        // Cannot split the file if only have one entry to write. Also don't
+        // start a split if in the middle of writing a node (pre > 0).
+        if (
+          pre.length === 0 &&
+          write.count > 1 &&
+          write.text.length + enc.length > opt.size
+        ) {
           write.text = ""
           // Otherwise split the entries in half.
           write.limit = Math.ceil(write.count / 2)
@@ -214,10 +220,6 @@ const Radisk = opt => {
           } else {
             write.file = key.substring(0, end)
           }
-          // write.limit can be reached after already writing properties of
-          // the current node, so remove it from write.sub before writing to
-          // disk so that it's not duplicated across files.
-          write.sub(write.file, null)
           write.count = 0
           radisk.write(name, write.sub, write.next)
           return true
