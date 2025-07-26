@@ -119,7 +119,6 @@ const Radisk = opt => {
   // 4. Read the previous file into memory
   // 5. Scan through in memory radix for all values lexically less than limit
   // 6. Merge and write all of those to the in-memory file and back to disk
-  // 7. If file is to large then split. More details needed here
   radisk.save = (rad, cb) => {
     const save = {
       find: (tree, key) => {
@@ -176,70 +175,47 @@ const Radisk = opt => {
     cache = null
     const write = {
       text: "",
+      limit: "",
+      done: false,
       count: 0,
-      file: file,
       each: (value, key, k, pre) => {
+        // each is called for all keys, but stop adding to write.text when
+        // write.slice is called, then the current contents of write.text
+        // will be written to file.
+        if (write.done) return
+
         write.count++
-        var enc =
-          Radisk.encode(pre.length) +
-          "#" +
-          Radisk.encode(k) +
-          (typeof value === "undefined" ? "" : "=" + Radisk.encode(value)) +
-          "\n"
+        value = typeof value === "undefined" ? "" : "=" + Radisk.encode(value)
+        const enc =
+          Radisk.encode(pre.length) + "#" + Radisk.encode(k) + value + "\n"
         // Cannot split the file if only have one entry to write. Also don't
         // start a split if in the middle of writing a node (pre > 0).
         if (
-          pre.length === 0 &&
           write.count > 1 &&
+          pre.length === 0 &&
           write.text.length + enc.length > opt.size
         ) {
-          write.text = ""
-          // Otherwise split the entries in half.
-          write.limit = Math.ceil(write.count / 2)
-          write.count = 0
+          const end = k.indexOf(enq)
+          write.limit = end === -1 ? k : k.substring(0, end)
+          write.done = true
           write.sub = Radix()
           Radix.map(rad, write.slice)
-          return true
+          radisk.write(write.limit, write.sub, cb)
+          return
         }
 
         write.text += enc
       },
-      put: () => {
-        opt.store.put(file, write.text, cb)
-      },
       slice: (value, key) => {
-        if (key < write.file) return
-
-        if (++write.count > write.limit) {
-          var name = write.file
-          // Use only the soul of the key as the filename so that all
-          // properties of a soul are written to the same file.
-          let end = key.indexOf(enq)
-          if (end === -1) {
-            write.file = key
-          } else {
-            write.file = key.substring(0, end)
-          }
-          write.count = 0
-          radisk.write(name, write.sub, write.next)
-          return true
-        }
+        if (key < write.limit) return
 
         write.sub(key, value)
       },
-      next: err => {
-        if (err) return cb(err)
-
-        write.sub = Radix()
-        if (!Radix.map(rad, write.slice)) {
-          radisk.write(write.file, write.sub, cb)
-        }
-      },
     }
-    // If Radix.map doesn't return true when called with write.each as a
-    // callback then didn't need to split the data. The accumulated write.text
-    // can then be stored with write.put().
-    if (!Radix.map(rad, write.each, true)) write.put()
+    Radix.map(rad, write.each, true)
+    // There is always accumulated write.text to store once write.each has
+    // finished.
+    opt.store.put(file, write.text, cb)
   }
 
   radisk.read = (key, cb) => {
@@ -248,11 +224,8 @@ const Radisk = opt => {
       if (typeof value !== "undefined") return cb(u, value)
     }
     // Only the soul of the key is compared to filenames (see radisk.write).
-    let soul = key
-    let end = key.indexOf(enq)
-    if (end !== -1) {
-      soul = key.substring(0, end)
-    }
+    const end = key.indexOf(enq)
+    const soul = end === -1 ? key : key.substring(0, end)
 
     const read = {
       lex: file => {

@@ -1,8 +1,6 @@
 import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Radisk from "../src/radisk.js"
-import Names from "./names.js"
-const names = Names()
 
 describe("radisk", () => {
   const puts = {}
@@ -175,8 +173,8 @@ describe("radisk", () => {
         "!":
           '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
-          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
-        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
+          '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"' + big + "\x1F\n",
       })
       radisk("newFile", (err, value) => {
@@ -198,8 +196,8 @@ describe("radisk", () => {
         "!":
           '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
-          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
-        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
+          '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"' + big + "\x1F\n",
         small: '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n',
       })
@@ -220,8 +218,8 @@ describe("radisk", () => {
         "!":
           '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
-          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
-        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
+          '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
         small: '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n',
       })
@@ -244,8 +242,8 @@ describe("radisk", () => {
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"' +
           big +
           "\x1F\n" +
-          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
-        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
+          '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
         small: '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n',
       })
@@ -265,8 +263,8 @@ describe("radisk", () => {
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"' +
           big +
           "\x1F\n" +
-          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
-        keyC: '\x1F+0\x1F#\x1F"keyC\x1F=\x1F"valueC\x1F\n',
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
+          '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
         small:
           '\x1F+0\x1F#\x1F"small\x1F=\x1F"small value\x1F\n' +
@@ -292,9 +290,8 @@ describe("radisk", () => {
           '\x1F+1\x1F#\x1F"A\x1F=\x1F"' +
           big +
           "\x1F\n" +
-          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
-        keyC:
-          '\x1F+0\x1F#\x1F"key\x1F\n\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n' +
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
+          '\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n' +
           '\x1F+1\x1F#\x1F"D\x1F=\x1F"valueD\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
         small:
@@ -319,9 +316,8 @@ describe("radisk", () => {
         "!":
           '\x1F+0\x1F#\x1F"key\x1F=\x1F \x1F\n' +
           '\x1F+1\x1F#\x1F"A\x1F=\x1F \x1F\n' +
-          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n',
-        keyC:
-          '\x1F+0\x1F#\x1F"key\x1F\n\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n' +
+          '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
+          '\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n' +
           '\x1F+1\x1F#\x1F"D\x1F=\x1F"valueD\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
         small:
