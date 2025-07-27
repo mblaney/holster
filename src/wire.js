@@ -231,10 +231,7 @@ const Wire = opt => {
               return
             }
 
-            if (retry++ > 5) {
-              clearInterval(interval)
-              console.log("websocket not available")
-            }
+            if (retry++ > 5) clearInterval(interval)
           }, 1000)
         }
       })
@@ -279,10 +276,7 @@ const Wire = opt => {
             return
           }
 
-          if (retry++ > 5) {
-            clearInterval(interval)
-            console.log("websocket not available")
-          }
+          if (retry++ > 5) clearInterval(interval)
         }, 1000)
       }
     })

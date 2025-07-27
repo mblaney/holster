@@ -70,7 +70,7 @@ const Holster = opt => {
                 const data = await new Promise(res => {
                   const _ctxid = utils.text.random()
                   allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
-                  api(_ctxid).next(null, res)
+                  api(_ctxid).next(null, res, _opt)
                 })
                 msg.put[soul][key] = data
               }
@@ -145,39 +145,65 @@ const Holster = opt => {
         // whole node for verification.
         const lex =
           ctx.user || opt.secure ? {"#": soul} : {"#": soul, ".": item}
-        wire.get(lex, async msg => {
-          if (msg.err) {
-            if (ctx.user || opt.secure) {
-              console.log(`error getting ${soul}: ${msg.err}`)
-            } else {
-              console.log(`error getting ${item} on ${soul}: ${msg.err}`)
-            }
-            if (cb) cb(null)
-            return
-          }
-
-          let node = msg.put && msg.put[soul]
-          if (node && typeof node[item] !== "undefined") {
-            let id = utils.rel.is(node[item])
-            if (id) {
-              ctx.chain[i].soul = id
-              allctx.set(ctxid, {...ctx})
-              // Call api again using the updated context.
-              if (get) {
-                api(ctxid).next(null, request.get, cb, request._opt)
-              } else if (put) {
-                api(ctxid).put(request.put, cb)
-              } else if (on) {
-                api(ctxid).on(request.on, cb, request._get, request._opt)
-              } else if (off) {
-                api(ctxid).off(cb)
+        wire.get(
+          lex,
+          async msg => {
+            if (msg.err) {
+              if (ctx.user || opt.secure) {
+                console.log(`error getting ${soul}: ${msg.err}`)
+              } else {
+                console.log(`error getting ${item} on ${soul}: ${msg.err}`)
               }
-            } else if (get) {
-              // Request was not for a node, return property on current soul.
-              cb(node[item])
+              if (cb) cb(null)
+              return
+            }
+
+            let node = msg.put && msg.put[soul]
+            if (node && typeof node[item] !== "undefined") {
+              let id = utils.rel.is(node[item])
+              if (id) {
+                ctx.chain[i].soul = id
+                allctx.set(ctxid, {...ctx})
+                // Call api again using the updated context.
+                if (get) {
+                  api(ctxid).next(null, request.get, cb, request._opt)
+                } else if (put) {
+                  api(ctxid).put(request.put, cb)
+                } else if (on) {
+                  api(ctxid).on(request.on, cb, request._get, request._opt)
+                } else if (off) {
+                  api(ctxid).off(cb)
+                }
+              } else if (get) {
+                // Request was not for a node, return property on current soul.
+                cb(node[item])
+              } else if (put) {
+                // Request was chained before put, so rel doesn't exist yet.
+                id = utils.text.random()
+                node[item] = utils.rel.ify(id)
+                const g = await graph(soul, node, ctx.user, cb)
+                if (g === null) return
+
+                wire.put(g, err => {
+                  if (err) {
+                    cb(`error putting ${item} on ${soul}: ${err}`)
+                    return
+                  }
+
+                  ctx.chain[i].soul = id
+                  api(ctxid).put(request.put, cb)
+                })
+              } else if (on) {
+                // Allow listening to a node that doesn't exist.
+                cb(null)
+              } else if (off) {
+                // Allow stop listening to a node that doesn't exist.
+                if (cb) cb(null)
+              }
             } else if (put) {
               // Request was chained before put, so rel doesn't exist yet.
-              id = utils.text.random()
+              const id = utils.text.random()
+              if (!node) node = {}
               node[item] = utils.rel.ify(id)
               const g = await graph(soul, node, ctx.user, cb)
               if (g === null) return
@@ -191,35 +217,13 @@ const Holster = opt => {
                 ctx.chain[i].soul = id
                 api(ctxid).put(request.put, cb)
               })
-            } else if (on) {
-              // Allow listening to a node that doesn't exist.
-              cb(null)
-            } else if (off) {
-              // Allow stop listening to a node that doesn't exist.
+            } else {
+              // Allow querying a node that doesn't exist.
               if (cb) cb(null)
             }
-          } else if (put) {
-            // Request was chained before put, so rel doesn't exist yet.
-            const id = utils.text.random()
-            if (!node) node = {}
-            node[item] = utils.rel.ify(id)
-            const g = await graph(soul, node, ctx.user, cb)
-            if (g === null) return
-
-            wire.put(g, err => {
-              if (err) {
-                cb(`error putting ${item} on ${soul}: ${err}`)
-                return
-              }
-
-              ctx.chain[i].soul = id
-              api(ctxid).put(request.put, cb)
-            })
-          } else {
-            // Allow querying a node that doesn't exist.
-            if (cb) cb(null)
-          }
-        })
+          },
+          request._opt,
+        )
         // Callback has been passed to next soul lookup or called above, so
         // return false as the calling code should not continue.
         return false
@@ -543,25 +547,29 @@ const Holster = opt => {
         allctx.set(ctxid, {chain: [{item: item, soul: soul}], on: true})
         // Map the user's callback because it can also be passed to off,
         // so need a reference to it to compare them.
-        map.set(cb, () => api(ctxid).next(null, cb))
+        map.set(cb, () => api(ctxid).next(null, cb, _opt))
         // Check if item is a rel and add event listener for the node.
-        wire.get({"#": soul, ".": item}, msg => {
-          if (msg.err) {
-            console.log(`error getting ${soul}.${item}: ${msg.err}`)
-            return
-          }
+        wire.get(
+          {"#": soul, ".": item},
+          msg => {
+            if (msg.err) {
+              console.log(`error getting ${soul}.${item}: ${msg.err}`)
+              return
+            }
 
-          const current = msg.put && msg.put[soul] && msg.put[soul][item]
-          const id = utils.rel.is(current)
-          if (id) {
-            if (lex) lex = utils.obj.put(lex, "#", id)
-            else lex = {"#": id, ".": null}
-          } else {
-            if (lex) lex = utils.obj.put(lex, "#", soul)
-            else lex = {"#": soul, ".": item}
-          }
-          wire.on(lex, map.get(cb), _get, _opt)
-        })
+            const current = msg.put && msg.put[soul] && msg.put[soul][item]
+            const id = utils.rel.is(current)
+            if (id) {
+              if (lex) lex = utils.obj.put(lex, "#", id)
+              else lex = {"#": id, ".": null}
+            } else {
+              if (lex) lex = utils.obj.put(lex, "#", soul)
+              else lex = {"#": soul, ".": item}
+            }
+            wire.on(lex, map.get(cb), _get, _opt)
+          },
+          _opt,
+        )
       },
       off: cb => {
         if (!ctxid) {
