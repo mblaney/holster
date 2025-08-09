@@ -197,11 +197,14 @@ const Radisk = opt => {
         ) {
           const end = k.indexOf(enq)
           write.limit = end === -1 ? k : k.substring(0, end)
-          write.done = true
-          write.sub = Radix()
-          Radix.map(rad, write.slice)
-          radisk.write(write.limit, write.sub, cb)
-          return
+          // Cannot split if they key is the same as the current file name.
+          if (write.limit !== file) {
+            write.done = true
+            write.sub = Radix()
+            Radix.map(rad, write.slice)
+            radisk.write(write.limit, write.sub, cb)
+            return
+          }
         }
 
         write.text += enc
