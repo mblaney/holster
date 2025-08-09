@@ -1,5 +1,7 @@
-Holster is a service that allows synchronising data between devices using Node,
+Holster is a service for synchronising data between devices using Node,
 Deno, Bun or the browser.
+
+Try it out at [holster.haza.website](https://holster.haza.website)!
 
 It is a port of [GunDB](https://gun.eco), following
 [Porting Gun](https://github.com/gundb/port) and is implemented as JavaScript
