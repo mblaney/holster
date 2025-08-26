@@ -1,7 +1,18 @@
 import {match} from "./utils.js"
 
 const Get = (lex, graph) => {
+  if (!lex || typeof lex !== "object") {
+    throw new TypeError("lex must be an object")
+  }
+  if (!graph || typeof graph !== "object") {
+    throw new TypeError("graph must be an object")
+  }
+
   const soul = lex["#"]
+  if (!soul || typeof soul !== "string") {
+    throw new TypeError("soul must be a string")
+  }
+
   if (!graph[soul]) return
 
   const node = {_: {"#": soul, ">": {}}}

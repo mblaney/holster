@@ -49,6 +49,12 @@ const fileSystem = opt => {
       },
       list: cb => {
         fs.readdir(dir, (err, files) => {
+          if (err) {
+            console.log("fs.readdir error:", err)
+            cb()
+            return
+          }
+
           files.forEach(cb)
           cb()
         })
@@ -206,8 +212,12 @@ const Store = opt => {
 
   return {
     get: (lex, cb) => {
-      if (!lex) {
+      if (!lex || !utils.obj.is(lex)) {
         cb("lex required")
+        return
+      }
+      if (!lex["#"]) {
+        cb("soul required in lex")
         return
       }
 
@@ -241,18 +251,22 @@ const Store = opt => {
         return
       }
 
-      var count = 0
+      let count = 0
+      let finished = false
       const ack = err => {
         count--
-        if (ack.err) return
+        if (finished) return
 
-        ack.err = err
-        if (ack.err) {
-          cb(ack.err)
+        if (err) {
+          finished = true
+          cb(err)
           return
         }
 
-        if (count === 0) cb(null)
+        if (count === 0) {
+          finished = true
+          cb(null)
+        }
       }
 
       Object.keys(graph).forEach(soul => {

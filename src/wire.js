@@ -164,7 +164,13 @@ const Wire = opt => {
         // across the network.
         const update = await Ham.mix(data, graph, opt.secure, listen)
         const none = Object.keys(update.now).length === 0
-        if (none || !(await check(update.now, send, cb))) return
+        if (none) {
+          // Nothing to do.
+          cb(null)
+          return
+        }
+
+        if (!(await check(update.now, send, cb))) return
 
         store.put(update.now, cb)
         // Also put data on the wire spec.
