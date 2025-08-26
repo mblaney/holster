@@ -8,6 +8,8 @@ const Dup = maxAge => {
     dup.store[id] = Date.now()
     if (!dup.expiry) {
       dup.expiry = setTimeout(() => {
+        if (dup.expiry) return
+
         const now = Date.now()
         Object.keys(dup.store).forEach(id => {
           if (now - dup.store[id] > maxAge) delete dup.store[id]

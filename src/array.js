@@ -5,29 +5,40 @@ if (typeof btoa === "undefined") {
 
 // This is Array extended to have .toString(["utf8"|"hex"|"base64"])
 function SeaArray() {}
-
 Object.assign(SeaArray, {from: Array.from})
 SeaArray.prototype = Object.create(Array.prototype)
+
 SeaArray.prototype.toString = function (enc, start, end) {
   if (!enc) enc = "utf8"
   if (!start) start = 0
 
-  const length = this.length
+  end = end ? Math.min(Math.max(end, start), this.length) : this.length
+
   if (enc === "hex") {
-    const buf = new Uint8Array(this)
-    return [...Array(((end && end + 1) || length) - start).keys()]
-      .map(i => buf[i + start].toString(16).padStart(2, "0"))
-      .join("")
+    const buf = new Uint8Array(this.slice(start, end))
+    return Array.from(buf, byte => byte.toString(16).padStart(2, "0")).join("")
   }
 
   if (enc === "utf8") {
-    return Array.from({length: (end || length) - start}, (_, i) =>
-      String.fromCharCode(this[i + start]),
-    ).join("")
+    return Array.from({length: end - start}, (_, i) => {
+      const charCode = this[i + start]
+      // Use unicode replacement character for invalid character codes.
+      if (charCode < 0 || charCode > 0x10ffff) {
+        return String.fromCharCode(0xfffd)
+      }
+      return String.fromCharCode(charCode)
+    }).join("")
   }
 
   if (enc === "base64") {
-    return btoa(this)
+    const utf8String = Array.from({length: end - start}, (_, i) => {
+      const charCode = this[i + start]
+      if (charCode < 0 || charCode > 255) {
+        return String.fromCharCode(0xfffd)
+      }
+      return String.fromCharCode(charCode)
+    }).join("")
+    return btoa(utf8String)
   }
 }
 

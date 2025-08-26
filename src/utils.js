@@ -1,18 +1,25 @@
 export const num = {
-  is: n =>
-    !(n instanceof Array) &&
-    (n - parseFloat(n) + 1 >= 0 || Infinity === n || -Infinity === n),
+  is: n => {
+    if (n instanceof Array) return false
+
+    if (typeof n === "number") return !isNaN(n)
+
+    if (typeof n === "string") {
+      const parsed = parseFloat(n)
+      return !isNaN(parsed) && isFinite(parsed)
+    }
+
+    return false
+  },
 }
 
 export const obj = {
   is: o => {
-    if (!o) return false
+    if (!o || typeof o !== "object") return false
 
-    return (
-      (o instanceof Object && o.constructor === Object) ||
-      Object.prototype.toString.call(o).match(/^\[object (\w+)\]$/)[1] ===
-        "Object"
-    )
+    const toString = Object.prototype.toString.call(o)
+    const match = toString.match(/^\[object (\w+)\]$/)
+    return o.constructor === Object || (match && match[1] === "Object")
   },
   map: (list, cb, o) => {
     var keys = Object.keys(list)
@@ -74,11 +81,13 @@ export const userPublicKey = "_holster_user_public_key"
 // graph converts objects to graph format with updated states,
 // with optional meta data to verify signed data.
 export const graph = (soul, data, sig, pub) => {
+  const timestamp = Date.now()
   const g = {[soul]: {_: {"#": soul, ">": {}}}}
+
   for (const [key, value] of Object.entries(data)) {
-    if (key !== "_" && key != userPublicKey && key != userSignature) {
+    if (key !== "_" && key !== userPublicKey && key !== userSignature) {
       g[soul][key] = value
-      g[soul]._[">"][key] = Date.now()
+      g[soul]._[">"][key] = timestamp
     }
   }
   // If a signature and public key are provided they also need to be stored on
@@ -87,9 +96,9 @@ export const graph = (soul, data, sig, pub) => {
   // broadcast the data as a put, which other devices will need to verify.
   if (sig && pub) {
     g[soul][userSignature] = sig
-    g[soul]._[">"][userSignature] = Date.now()
+    g[soul]._[">"][userSignature] = timestamp
     g[soul][userPublicKey] = pub
-    g[soul]._[">"][userPublicKey] = Date.now()
+    g[soul]._[">"][userPublicKey] = timestamp
   }
   return g
 }
@@ -121,7 +130,7 @@ export const match = (lex, key) => {
 export const text = {
   random: length => {
     var s = ""
-    const c = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXZabcdefghijklmnopqrstuvwxyz"
+    const c = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
     if (!length) length = 24
     for (let i = 0; i < length; i++) {
       s += c.charAt(Math.floor(Math.random() * c.length))

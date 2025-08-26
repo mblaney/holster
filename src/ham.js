@@ -1,6 +1,10 @@
 import * as utils from "./utils.js"
 import SEA from "./sea.js"
 
+const LISTENER_DELAY = 100
+// Maximum number of souls to keep in memory
+const MAX_GRAPH_SIZE = 10000
+
 // state and value are the incoming changes.
 // currentState and currentValue are the current graph data.
 const Ham = (state, currentState, value, currentValue) => {
@@ -26,6 +30,16 @@ const Ham = (state, currentState, value, currentValue) => {
 }
 
 Ham.mix = async (change, graph, secure, listen) => {
+  if (!change || typeof change !== "object") {
+    throw new TypeError("change must be an object")
+  }
+  if (!graph || typeof graph !== "object") {
+    throw new TypeError("graph must be an object")
+  }
+  if (!listen || typeof listen !== "object") {
+    throw new TypeError("listen must be an object")
+  }
+
   const machine = Date.now()
   const now = {}
   const defer = {}
@@ -103,9 +117,6 @@ Ham.mix = async (change, graph, secure, listen) => {
           if (!now[soul]) {
             now[soul] = {_: {"#": soul, ">": {}}}
           }
-          // TODO: graph should not just grow indefintitely in memory.
-          // Need to have a max size after which start dropping the oldest state
-          // Do something similar to Dup which can handle deletes?
           if (!graph[soul]) {
             graph[soul] = {_: {"#": soul, ">": {}}}
           }
@@ -121,7 +132,7 @@ Ham.mix = async (change, graph, secure, listen) => {
                   .filter(l => utils.match(l["."], key))
                   .forEach(l => l.cb())
               }
-            }, 100)
+            }, LISTENER_DELAY)
           }
           updated = true
         }
@@ -139,9 +150,24 @@ Ham.mix = async (change, graph, secure, listen) => {
         if (listen[soul]) {
           listen[soul].filter(l => utils.match(l["."])).forEach(l => l.cb())
         }
-      }, 100)
+      }, LISTENER_DELAY)
     }
   }
+
+  const souls = Object.keys(graph)
+  if (souls.length > MAX_GRAPH_SIZE) {
+    // Sort by oldest state timestamp and remove oldest entries
+    const soulsByAge = souls
+      .map(soul => {
+        const states = graph[soul]._ && graph[soul]._[">"]
+        const maxState = states ? Math.max(...Object.values(states)) : 0
+        return {soul, maxState}
+      })
+      .sort((a, b) => a.maxState - b.maxState)
+    const remove = soulsByAge.slice(0, souls.length - maxSize)
+    remove.forEach(({soul}) => delete graph[soul])
+  }
+
   return {now: now, defer: defer, wait: wait}
 }
 
