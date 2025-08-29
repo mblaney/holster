@@ -12,6 +12,142 @@ if (typeof globalThis.WebSocket === "undefined") {
   globalThis.WebSocket = wsModule?.WebSocket
 }
 
+// Rate limiting with throttling
+const createRateLimiter = opt => {
+  const clients = new Map()
+  const maxRequests = opt.maxRequestsPerMinute || 100
+  const windowMs = opt.rateLimitWindow || 60000
+  // Check if test environment (mock-socket usage)
+  const isTestEnv = opt.wss && opt.wss.constructor.name === "Server"
+  let cleanupInterval = null
+
+  const cleanup = () => {
+    const now = Date.now()
+    for (const [clientId, data] of clients.entries()) {
+      if (now - data.lastCleanup > windowMs) {
+        data.requests = []
+        data.lastCleanup = now
+      }
+      data.requests = data.requests.filter(time => now - time < windowMs)
+    }
+  }
+
+  if (!isTestEnv) {
+    cleanupInterval = setInterval(cleanup, windowMs / 4)
+  }
+
+  return {
+    getDelay: clientId => {
+      const now = Date.now()
+      const client = clients.get(clientId) || {
+        requests: [],
+        lastCleanup: now,
+      }
+
+      // Filter old requests
+      client.requests = client.requests.filter(time => now - time < windowMs)
+
+      if (client.requests.length >= maxRequests) {
+        // Calculate delay based on oldest request that will expire
+        const oldestRequest = Math.min(...client.requests)
+        const delay = windowMs - (now - oldestRequest)
+        return Math.max(0, delay)
+      }
+
+      // No delay needed, track this request
+      client.requests.push(now)
+      clients.set(clientId, client)
+      return 0
+    },
+
+    getRemainingRequests: clientId => {
+      const client = clients.get(clientId)
+      if (!client) return maxRequests
+
+      const now = Date.now()
+      const validRequests = client.requests.filter(
+        time => now - time < windowMs,
+      )
+      return Math.max(0, maxRequests - validRequests.length)
+    },
+
+    destroy: () => {
+      if (cleanupInterval) {
+        clearInterval(cleanupInterval)
+        cleanupInterval = null
+      }
+      clients.clear()
+    },
+  }
+}
+
+// Safe JSON parser with size limit
+const safeJSONParse = (data, maxSize = 1024 * 1024) => {
+  try {
+    if (typeof data === "string" && data.length > maxSize) {
+      throw new Error("Message too large")
+    }
+    return {success: true, data: JSON.parse(data)}
+  } catch (error) {
+    return {success: false, error: error.message}
+  }
+}
+
+// Message size validator
+const validateMessage = (data, maxSize = 1024 * 1024) => {
+  // 1MB default
+  if (typeof data === "string" && data.length > maxSize) {
+    return {valid: false, error: "Message too large"}
+  }
+  if (Buffer.isBuffer(data) && data.length > maxSize) {
+    return {valid: false, error: "Message too large"}
+  }
+  return {valid: true}
+}
+
+// Connection manager to limit concurrent connections
+const createConnectionManager = (maxConnections = 1000) => {
+  const connections = new Set()
+
+  return {
+    add: ws => {
+      if (connections.size >= maxConnections) {
+        return false
+      }
+      connections.add(ws)
+
+      // Clean up on close
+      const originalClose = ws.close
+      ws.close = (...args) => {
+        connections.delete(ws)
+        return originalClose.apply(ws, args)
+      }
+
+      return true
+    },
+
+    remove: ws => {
+      connections.delete(ws)
+    },
+
+    count: () => connections.size,
+
+    isFull: () => connections.size >= maxConnections,
+  }
+}
+
+// Enhanced retry mechanism with exponential backoff
+const createRetryHandler = (maxRetries = 5) => {
+  let retryCount = 0
+
+  return {
+    shouldRetry: () => retryCount < maxRetries,
+    getDelay: () => Math.min(1000 * Math.pow(2, retryCount), 30000), // Max 30s
+    increment: () => retryCount++,
+    reset: () => (retryCount = 0),
+  }
+}
+
 // Wire starts a websocket client or server and returns get and put methods
 // for access to the wire spec and storage.
 const Wire = opt => {
@@ -20,6 +156,23 @@ const Wire = opt => {
   const graph = {}
   const queue = {}
   const listen = {}
+
+  // Track references we want but don't have yet
+  const pendingReferences = new Set()
+
+  // Helper to check if we have a soul in memory or storage
+  const hasSoul = async soul => {
+    if (graph[soul]) return true
+    return new Promise(resolve => {
+      store.get({"#": soul}, (err, data) => {
+        resolve(!err && data && data[soul])
+      })
+    })
+  }
+
+  // Initialize rate limiting and connection management
+  const rateLimiter = createRateLimiter(opt)
+  const connectionManager = createConnectionManager(opt.maxConnections || 1000)
 
   // The check function is required because user data must provide a public key
   // so that it can be verified. The public key might verify the provided
@@ -155,6 +308,10 @@ const Wire = opt => {
   const api = send => {
     return {
       get: (lex, cb, _opt) => {
+        // Mark requested soul as something we want to store
+        if (lex && lex["#"]) {
+          pendingReferences.add(lex["#"])
+        }
         getWithCallback(lex, cb, send, _opt)
       },
       put: async (data, cb) => {
@@ -172,10 +329,21 @@ const Wire = opt => {
 
         if (!(await check(update.now, send, cb))) return
 
+        // Seed pendingReferences with any new references from API calls
+        for (const [soul, node] of Object.entries(update.now)) {
+          if (node && typeof node === "object") {
+            for (const [key, value] of Object.entries(node)) {
+              const soulId = utils.rel.is(value)
+              if (soulId) {
+                // Add referenced soul to pending list
+                pendingReferences.add(soulId)
+              }
+            }
+          }
+        }
+
         store.put(update.now, cb)
         // Also put data on the wire spec.
-        // TODO: Note that this means all clients now receive all updates, so
-        // need to filter what should be stored, both in graph and on disk.
         send(
           JSON.stringify({
             "#": dup.track(utils.text.random(9)),
@@ -229,61 +397,117 @@ const Wire = opt => {
         if (client && client.readyState === WebSocket.OPEN) {
           client.send(data, {binary: isBinary})
         } else {
-          let retry = 0
-          const interval = setInterval(() => {
-            if (client && client.readyState === WebSocket.OPEN) {
-              clearInterval(interval)
-              client.send(data, {binary: isBinary})
-              return
-            }
+          const retryHandler = client._retryHandler || createRetryHandler()
+          client._retryHandler = retryHandler
 
-            if (retry++ > 5) clearInterval(interval)
-          }, 1000)
+          if (retryHandler.shouldRetry()) {
+            const delay = retryHandler.getDelay()
+            retryHandler.increment()
+
+            setTimeout(() => {
+              if (client && client.readyState === WebSocket.OPEN) {
+                retryHandler.reset()
+                client.send(data, {binary: isBinary})
+              }
+            }, delay)
+          }
         }
       })
     }
     wss.on("connection", ws => {
-      ws.on("error", console.error)
+      // Check connection limit
+      if (!connectionManager.add(ws)) {
+        console.log("Connection limit reached, rejecting connection")
+        ws.close(1013, "Connection limit reached - try again later")
+        return
+      }
+
+      // Generate unique client ID for rate limiting
+      const clientId = utils.text.random(9)
+
+      ws.on("error", error => {
+        console.error("WebSocket error:", error)
+        connectionManager.remove(ws)
+      })
+
+      ws.on("close", () => {
+        connectionManager.remove(ws)
+      })
 
       ws.on("message", (data, isBinary) => {
-        const msg = JSON.parse(data)
+        // Validate message size
+        const validation = validateMessage(data, opt.maxMessageSize)
+        if (!validation.valid) {
+          console.warn(`Invalid message: ${validation.error}`)
+          ws.send(JSON.stringify({error: validation.error}))
+          return
+        }
+
+        // Safe JSON parsing
+        const parseResult = safeJSONParse(data, opt.maxMessageSize)
+        if (!parseResult.success) {
+          console.warn(`JSON parse error: ${parseResult.error}`)
+          ws.send(JSON.stringify({error: "Invalid JSON"}))
+          return
+        }
+
+        const msg = parseResult.data
         if (dup.check(msg["#"])) return
 
-        dup.track(msg["#"])
-        if (msg.get) get(msg, send)
-        if (msg.put) put(msg, send)
-        send(data, isBinary)
+        // Check rate limit and get delay
+        const delay = rateLimiter.getDelay(clientId)
 
-        const id = msg["@"]
-        const cb = queue[id]
-        if (cb) {
-          delete msg["#"]
-          delete msg["@"]
-          cb(msg)
+        const processMessage = () => {
+          dup.track(msg["#"])
 
-          delete queue[id]
+          if (msg.get) get(msg, send)
+          if (msg.put) put(msg, send)
+          send(data, isBinary)
+
+          const id = msg["@"]
+          const cb = queue[id]
+          if (cb) {
+            delete msg["#"]
+            delete msg["@"]
+            cb(msg)
+
+            delete queue[id]
+          }
+        }
+
+        if (delay > 0) {
+          // Throttle the client by delaying message processing
+          setTimeout(processMessage, delay)
+        } else {
+          // Process immediately
+          processMessage()
         }
       })
     })
     return api(send)
   }
 
+  // Browser logic.
   const peers = []
   const send = data => {
     peers.forEach(peer => {
       if (peer && peer.readyState === WebSocket.OPEN) {
         peer.send(data)
       } else {
-        let retry = 0
-        const interval = setInterval(() => {
-          if (peer && peer.readyState === WebSocket.OPEN) {
-            clearInterval(interval)
-            peer.send(data)
-            return
-          }
+        const retryHandler = peer._retryHandler || createRetryHandler()
+        peer._retryHandler = retryHandler
 
-          if (retry++ > 5) clearInterval(interval)
-        }, 1000)
+        if (retryHandler.shouldRetry()) {
+          const delay = retryHandler.getDelay()
+          retryHandler.increment()
+
+          setTimeout(() => {
+            if (peer && peer.readyState === WebSocket.OPEN) {
+              retryHandler.reset()
+              peer.send(data)
+            }
+          }, delay)
+        }
       }
     })
   }
@@ -294,23 +518,69 @@ const Wire = opt => {
     const start = () => {
       let ws = new WebSocket(peer)
       peers.push(ws)
+      const retryHandler = createRetryHandler()
+
       ws.onclose = c => {
         if (peers.indexOf(ws) !== -1) {
           peers.splice(peers.indexOf(ws), 1)
         }
         ws = null
-        setTimeout(start, Math.floor(Math.random() * 5000))
+
+        if (retryHandler.shouldRetry()) {
+          const delay = retryHandler.getDelay()
+          retryHandler.increment()
+          setTimeout(start, delay)
+        }
       }
+
+      ws.onopen = () => {
+        retryHandler.reset()
+      }
+
       ws.onerror = e => {
         console.error(e)
       }
-      ws.onmessage = m => {
+      ws.onmessage = async m => {
         const msg = JSON.parse(m.data)
         if (dup.check(msg["#"])) return
 
         dup.track(msg["#"])
         if (msg.get) get(msg, send)
-        if (msg.put) put(msg, send)
+        if (msg.put) {
+          // Handle selective storage for client WebSocket messages
+          const filteredPut = {}
+          for (const [soul, node] of Object.entries(msg.put)) {
+            let shouldStore = false
+            // Case 1: We already have this soul - always update
+            if (await hasSoul(soul)) {
+              shouldStore = true
+              // Check if this update adds new references
+              if (node && typeof node === "object") {
+                for (const [key, value] of Object.entries(node)) {
+                  const soulId = utils.rel.is(value)
+                  if (soulId) {
+                    // Add referenced soul to pending list
+                    pendingReferences.add(soulId)
+                  }
+                }
+              }
+            }
+            // Case 2: This soul was referenced by something we have
+            if (pendingReferences.has(soul)) {
+              shouldStore = true
+              pendingReferences.delete(soul) // Got it, remove from pending
+            }
+            if (shouldStore) {
+              filteredPut[soul] = node
+            }
+          }
+          // Store filtered data if any
+          if (Object.keys(filteredPut).length > 0) {
+            // Create filtered message for Ham.mix
+            const filteredMsg = {put: filteredPut}
+            put(filteredMsg, send)
+          }
+        }
         send(m.data)
 
         const id = msg["@"]
