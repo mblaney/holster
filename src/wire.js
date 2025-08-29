@@ -157,6 +157,19 @@ const Wire = opt => {
   const queue = {}
   const listen = {}
 
+  // Track references we want but don't have yet
+  const pendingReferences = new Set()
+
+  // Helper to check if we have a soul in memory or storage
+  const hasSoul = async soul => {
+    if (graph[soul]) return true
+    return new Promise(resolve => {
+      store.get({"#": soul}, (err, data) => {
+        resolve(!err && data && data[soul])
+      })
+    })
+  }
+
   // Initialize rate limiting and connection management
   const rateLimiter = createRateLimiter(opt)
   const connectionManager = createConnectionManager(opt.maxConnections || 1000)
@@ -295,6 +308,10 @@ const Wire = opt => {
   const api = send => {
     return {
       get: (lex, cb, _opt) => {
+        // Mark requested soul as something we want to store
+        if (lex && lex["#"]) {
+          pendingReferences.add(lex["#"])
+        }
         getWithCallback(lex, cb, send, _opt)
       },
       put: async (data, cb) => {
@@ -312,10 +329,21 @@ const Wire = opt => {
 
         if (!(await check(update.now, send, cb))) return
 
+        // Seed pendingReferences with any new references from API calls
+        for (const [soul, node] of Object.entries(update.now)) {
+          if (node && typeof node === "object") {
+            for (const [key, value] of Object.entries(node)) {
+              const soulId = utils.rel.is(value)
+              if (soulId) {
+                // Add referenced soul to pending list
+                pendingReferences.add(soulId)
+              }
+            }
+          }
+        }
+
         store.put(update.now, cb)
         // Also put data on the wire spec.
-        // TODO: Note that this means all clients now receive all updates, so
-        // need to filter what should be stored, both in graph and on disk.
         send(
           JSON.stringify({
             "#": dup.track(utils.text.random(9)),
@@ -459,6 +487,7 @@ const Wire = opt => {
     return api(send)
   }
 
+  // Browser logic.
   const peers = []
   const send = data => {
     peers.forEach(peer => {
@@ -511,13 +540,47 @@ const Wire = opt => {
       ws.onerror = e => {
         console.error(e)
       }
-      ws.onmessage = m => {
+      ws.onmessage = async m => {
         const msg = JSON.parse(m.data)
         if (dup.check(msg["#"])) return
 
         dup.track(msg["#"])
         if (msg.get) get(msg, send)
-        if (msg.put) put(msg, send)
+        if (msg.put) {
+          // Handle selective storage for client WebSocket messages
+          const filteredPut = {}
+          for (const [soul, node] of Object.entries(msg.put)) {
+            let shouldStore = false
+            // Case 1: We already have this soul - always update
+            if (await hasSoul(soul)) {
+              shouldStore = true
+              // Check if this update adds new references
+              if (node && typeof node === "object") {
+                for (const [key, value] of Object.entries(node)) {
+                  const soulId = utils.rel.is(value)
+                  if (soulId) {
+                    // Add referenced soul to pending list
+                    pendingReferences.add(soulId)
+                  }
+                }
+              }
+            }
+            // Case 2: This soul was referenced by something we have
+            if (pendingReferences.has(soul)) {
+              shouldStore = true
+              pendingReferences.delete(soul) // Got it, remove from pending
+            }
+            if (shouldStore) {
+              filteredPut[soul] = node
+            }
+          }
+          // Store filtered data if any
+          if (Object.keys(filteredPut).length > 0) {
+            // Create filtered message for Ham.mix
+            const filteredMsg = {put: filteredPut}
+            put(filteredMsg, send)
+          }
+        }
         send(m.data)
 
         const id = msg["@"]
