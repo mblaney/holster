@@ -164,7 +164,7 @@ Ham.mix = async (change, graph, secure, listen) => {
         return {soul, maxState}
       })
       .sort((a, b) => a.maxState - b.maxState)
-    const remove = soulsByAge.slice(0, souls.length - maxSize)
+    const remove = soulsByAge.slice(0, souls.length - MAX_GRAPH_SIZE)
     remove.forEach(({soul}) => delete graph[soul])
   }
 
