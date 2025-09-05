@@ -12,11 +12,13 @@ const unit = String.fromCharCode(31)
 // opt.store interface.
 const Radisk = opt => {
   var u
-  var cache = null
+
+  // Multi-file cache for all parsed radix trees
+  const cache = new Map()
 
   if (!opt) opt = {}
   if (!opt.log) opt.log = console.log
-  if (!opt.batch) opt.batch = 10 * 1000
+  if (!opt.batch) opt.batch = 100 // Balanced batch size for performance
   if (!opt.write) opt.write = 1 // Wait time before write in milliseconds.
   if (!opt.size) opt.size = 1024 * 1024 // File size on disk, default 1MB.
   if (!opt.store) {
@@ -36,6 +38,17 @@ const Radisk = opt => {
   if (!opt.store.list) {
     opt.log("Radisk needs a streaming `store.list` interface with `(cb)`")
     return
+  }
+
+  // Performance logging
+  const perfLog = (operation, startTime, key, size) => {
+    const duration = Date.now() - startTime
+    if (duration > 500) {
+      // Log operations taking more than 500ms
+      console.log(
+        `[RADISK-SLOW] ${operation}: ${duration}ms for ${key}${size ? ` (${size} bytes)` : ""}`,
+      )
+    }
   }
 
   // Any and all storage adapters should:
@@ -63,7 +76,11 @@ const Radisk = opt => {
         }
       }
 
-      return radisk.read(key, cb)
+      const readStart = Date.now()
+      return radisk.read(key, (err, result) => {
+        perfLog("read", readStart, key)
+        cb(err, result)
+      })
     }
 
     // Otherwise store the value provided.
@@ -90,6 +107,7 @@ const Radisk = opt => {
       return (radisk.thrash.more = true)
     }
 
+    const thrashStart = Date.now()
     clearTimeout(radisk.batch.timeout)
     radisk.thrash.more = false
     radisk.thrash.ing = true
@@ -105,6 +123,7 @@ const Radisk = opt => {
       // file needs to be split.
       if (++i > 1) return
 
+      perfLog("thrash", thrashStart, `batch-${radisk.batch.ed}`)
       if (err) opt.log(err)
       batch.acks.forEach(cb => cb(err))
       radisk.thrash.at = null
@@ -143,9 +162,9 @@ const Radisk = opt => {
       },
       mix: (file, start, end) => {
         save.start = save.end = save.file = u
-        radisk.parse(file, (err, disk) => {
-          if (err) return cb(err)
-
+        // Use cache if available, otherwise parse from disk
+        if (cache.has(file)) {
+          const disk = cache.get(file)
           Radix.map(rad, (value, key) => {
             if (key < start) return
 
@@ -157,7 +176,23 @@ const Radisk = opt => {
             disk(key, value)
           })
           radisk.write(file, disk, save.next)
-        })
+        } else {
+          radisk.parse(file, (err, disk) => {
+            if (err) return cb(err)
+
+            Radix.map(rad, (value, key) => {
+              if (key < start) return
+
+              if (end && end < key) {
+                save.start = key
+                return
+              }
+
+              disk(key, value)
+            })
+            radisk.write(file, disk, save.next)
+          })
+        }
       },
       next: err => {
         if (err) return cb(err)
@@ -171,8 +206,8 @@ const Radisk = opt => {
   }
 
   radisk.write = (file, rad, cb) => {
-    // Invalidate cache on write.
-    cache = null
+    // Invalidate cache entry for this file on write
+    cache.delete(file)
     const write = {
       text: "",
       limit: "",
@@ -218,14 +253,14 @@ const Radisk = opt => {
     Radix.map(rad, write.each, true)
     // There is always accumulated write.text to store once write.each has
     // finished.
-    opt.store.put(file, write.text, cb)
+    const writeStart = Date.now()
+    opt.store.put(file, write.text, err => {
+      perfLog("file-write", writeStart, file, write.text.length)
+      cb(err)
+    })
   }
 
   radisk.read = (key, cb) => {
-    if (cache) {
-      let value = cache(key)
-      if (typeof value !== "undefined") return cb(u, value)
-    }
     // Only the soul of the key is compared to filenames (see radisk.write).
     const end = key.indexOf(enq)
     const soul = end === -1 ? key : key.substring(0, end)
@@ -240,6 +275,14 @@ const Radisk = opt => {
             return
           }
 
+          // Check multi-file cache first
+          if (cache.has(read.file)) {
+            const cachedRadix = cache.get(read.file)
+            read.value = cachedRadix(key)
+            if (typeof read.value !== "undefined") {
+              return cb(u, read.value)
+            }
+          }
           radisk.parse(read.file, read.it)
           return
         }
@@ -252,7 +295,8 @@ const Radisk = opt => {
       it: (err, disk) => {
         if (err) opt.log(err)
         if (disk) {
-          cache = disk
+          // Store in multi-file cache
+          cache.set(read.file, disk)
           read.value = disk(key)
         }
         cb(err, read.value)
@@ -303,18 +347,12 @@ const Radisk = opt => {
       split: data => {
         if (!data) return
 
-        let i = -1
-        let a = ""
-        let c = null
-        while ((c = data[++i])) {
-          if (c === unit) break
+        const i = data.indexOf(unit)
+        if (i === -1) return
 
-          a += c
-        }
+        const a = data.slice(0, i)
         let o = {}
-        if (c) {
-          return [a, Radisk.decode(data.slice(i), o), data.slice(i + o.i)]
-        }
+        return [a, Radisk.decode(data.slice(i), o), data.slice(i + o.i)]
       },
     }
     opt.store.get(file, parse.read)
@@ -355,27 +393,34 @@ Radisk.encode = data => {
 }
 
 Radisk.decode = (data, obj) => {
-  var text = ""
   var i = -1
   var n = 0
   var current = null
   var previous = null
+  var textStart = -1
+  var textEnd = -1
   if (data[0] !== unit) return
 
   // Find a control character previous to the text we want, skipping
   // consecutive unit separator characters at the beginning of the data.
   while ((current = data[++i])) {
     if (previous) {
+      if (textStart === -1) textStart = i
       if (current === unit) {
-        if (--n <= 0) break
+        if (--n <= 0) {
+          textEnd = i
+          break
+        }
       }
-      text += current
     } else if (current === unit) {
       n++
     } else {
       previous = current || true
     }
   }
+
+  const text =
+    textStart !== -1 ? data.slice(textStart, textEnd !== -1 ? textEnd : i) : ""
 
   if (obj) obj.i = i + 1
 
