@@ -424,6 +424,9 @@ const Wire = opt => {
 
       // Generate unique client ID for rate limiting
       const clientId = utils.text.random(9)
+      console.log(
+        `[HOLSTER-CONNECT] New WebSocket client connected: ${clientId}`,
+      )
 
       ws.on("error", error => {
         console.error("WebSocket error:", error)
@@ -431,6 +434,9 @@ const Wire = opt => {
       })
 
       ws.on("close", () => {
+        console.log(
+          `[HOLSTER-DISCONNECT] WebSocket client disconnected: ${clientId}`,
+        )
         connectionManager.remove(ws)
       })
 
@@ -456,6 +462,22 @@ const Wire = opt => {
 
         // Check rate limit and get delay
         const delay = rateLimiter.getDelay(clientId)
+        // Log rate limiting activity and enforce stricter limits
+        if (delay > 0) {
+          console.log(
+            `[HOLSTER-THROTTLE] Client ${clientId}: rate limit exceeded, delay would be ${delay}ms, dropping message`,
+          )
+          // Send throttle warning back to client instead of processing
+          ws.send(
+            JSON.stringify({
+              "#": dup.track(utils.text.random(9)),
+              "@": msg["#"],
+              err: `Rate limit exceeded. Slow down requests. Wait ${Math.ceil(delay / 1000)}s`,
+              throttle: delay,
+            }),
+          )
+          return
+        }
 
         const processMessage = () => {
           dup.track(msg["#"])
@@ -489,7 +511,11 @@ const Wire = opt => {
 
   // Browser logic.
   const peers = []
-  const send = data => {
+  // Client-side throttling state
+  let clientThrottled = false
+  let throttleUntil = 0
+
+  const sendToPeers = data => {
     peers.forEach(peer => {
       if (peer && peer.readyState === WebSocket.OPEN) {
         peer.send(data)
@@ -510,6 +536,26 @@ const Wire = opt => {
         }
       }
     })
+  }
+
+  const send = data => {
+    // Check if client is throttled before sending
+    const now = Date.now()
+    if (clientThrottled && now < throttleUntil) {
+      const delay = throttleUntil - now
+      console.log(
+        `[CLIENT-THROTTLED] Delaying message for ${delay}ms, throttled until ${new Date(throttleUntil).toLocaleTimeString()}`,
+      )
+      setTimeout(() => sendToPeers(data), delay)
+      return
+    } else if (clientThrottled && now >= throttleUntil) {
+      console.log(
+        `[CLIENT-THROTTLED] Throttle period ended, resuming normal operation`,
+      )
+      clientThrottled = false
+      throttleUntil = 0
+    }
+    sendToPeers(data)
   }
   if (!(opt.peers instanceof Array)) {
     opt.peers = [`ws://localhost:${opt.port || 8765}`]
@@ -543,6 +589,14 @@ const Wire = opt => {
       ws.onmessage = async m => {
         const msg = JSON.parse(m.data)
         if (dup.check(msg["#"])) return
+
+        // Handle throttle messages from server
+        if (msg.throttle && msg.err) {
+          console.log(`[CLIENT-THROTTLED] Server throttling: ${msg.err}`)
+          clientThrottled = true
+          throttleUntil = Date.now() + msg.throttle
+          return
+        }
 
         dup.track(msg["#"])
         if (msg.get) get(msg, send)
