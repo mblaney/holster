@@ -514,6 +514,46 @@ const Wire = opt => {
   // Client-side throttling state
   let clientThrottled = false
   let throttleUntil = 0
+  let messageQueue = []
+  let queueProcessor = null
+
+  const processQueue = () => {
+    if (messageQueue.length === 0) {
+      queueProcessor = null
+      return
+    }
+
+    const now = Date.now()
+    if (clientThrottled && now < throttleUntil) {
+      // Still throttled, schedule next queue check
+      queueProcessor = setTimeout(
+        processQueue,
+        Math.min(1000, throttleUntil - now),
+      )
+      return
+    }
+
+    // Throttle period ended, resume processing
+    if (clientThrottled && now >= throttleUntil) {
+      console.log(
+        `[CLIENT-THROTTLED] Throttle period ended, resuming queue processing`,
+      )
+      clientThrottled = false
+      throttleUntil = 0
+    }
+
+    // Process next message in queue
+    const data = messageQueue.shift()
+    sendToPeers(data)
+
+    // Schedule processing of next message if queue not empty
+    if (messageQueue.length > 0) {
+      // Add small delay between messages to avoid immediate re-throttling
+      queueProcessor = setTimeout(processQueue, 100)
+    } else {
+      queueProcessor = null
+    }
+  }
 
   const sendToPeers = data => {
     peers.forEach(peer => {
@@ -539,22 +579,23 @@ const Wire = opt => {
   }
 
   const send = data => {
-    // Check if client is throttled before sending
+    // Check if client is throttled or queue is active
     const now = Date.now()
-    if (clientThrottled && now < throttleUntil) {
-      const delay = throttleUntil - now
+    if (clientThrottled || messageQueue.length > 0) {
+      // Add message to queue instead of sending immediately
+      messageQueue.push(data)
       console.log(
-        `[CLIENT-THROTTLED] Delaying message for ${delay}ms, throttled until ${new Date(throttleUntil).toLocaleTimeString()}`,
+        `[CLIENT-THROTTLED] Queuing message (queue length: ${messageQueue.length})`,
       )
-      setTimeout(() => sendToPeers(data), delay)
+
+      // Start queue processor if not already running
+      if (!queueProcessor) {
+        queueProcessor = setTimeout(processQueue, 100)
+      }
       return
-    } else if (clientThrottled && now >= throttleUntil) {
-      console.log(
-        `[CLIENT-THROTTLED] Throttle period ended, resuming normal operation`,
-      )
-      clientThrottled = false
-      throttleUntil = 0
     }
+
+    // Normal case - send immediately
     sendToPeers(data)
   }
   if (!(opt.peers instanceof Array)) {
