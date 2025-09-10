@@ -15,6 +15,8 @@ const Radisk = opt => {
 
   // Multi-file cache for all parsed radix trees
   const cache = new Map()
+  // Pending reads queue to avoid duplicate reads for the same key
+  const pendingReads = new Map()
 
   if (!opt) opt = {}
   if (!opt.log) opt.log = console.log
@@ -43,8 +45,8 @@ const Radisk = opt => {
   // Performance logging
   const perfLog = (operation, startTime, key, size) => {
     const duration = Date.now() - startTime
-    if (duration > 500) {
-      // Log operations taking more than 500ms
+    if (duration > 1000) {
+      // Log operations taking more than 1000ms
       console.log(
         `[RADISK-SLOW] ${operation}: ${duration}ms for ${key}${size ? ` (${size} bytes)` : ""}`,
       )
@@ -76,10 +78,23 @@ const Radisk = opt => {
         }
       }
 
+      // Check if there's already a pending read for this key
+      if (pendingReads.has(key)) {
+        // Add callback to existing pending read
+        pendingReads.get(key).push(cb)
+        return
+      }
+
+      // Start new read and create callback queue
+      pendingReads.set(key, [cb])
+
       const readStart = Date.now()
       return radisk.read(key, (err, result) => {
         perfLog("read", readStart, key)
-        cb(err, result)
+        // Execute all pending callbacks for this key
+        const callbacks = pendingReads.get(key) || []
+        pendingReads.delete(key)
+        callbacks.forEach(callback => callback(err, result))
       })
     }
 
@@ -123,7 +138,7 @@ const Radisk = opt => {
       // file needs to be split.
       if (++i > 1) return
 
-      perfLog("thrash", thrashStart, `batch-${radisk.batch.ed}`)
+      perfLog("thrash", thrashStart, `batch-${batch.ed}`)
       if (err) opt.log(err)
       batch.acks.forEach(cb => cb(err))
       radisk.thrash.at = null
@@ -319,6 +334,7 @@ const Radisk = opt => {
         if (!data) return cb(u, parse.disk)
 
         let pre = []
+        let preString = ""
         // Work though data by splitting into 3 values. The first value says
         // if the second value is one of: the radix level for a key, the key
         // iteself, or a value. The third is the rest of the data to work with.
@@ -330,15 +346,23 @@ const Radisk = opt => {
           tmp = parse.split(tmp[2]) || ""
           if (tmp[0] === "#") {
             key = tmp[1]
-            pre = pre.slice(0, i)
-            if (i <= pre.length) pre.push(key)
+            // Optimize prefix building - avoid repeated joins
+            if (i < pre.length) {
+              pre.length = i
+            }
+            if (i <= pre.length) {
+              pre[i] = key
+              pre.length = i + 1
+            }
+            // Only rebuild preString when prefix changes
+            preString = pre.join("")
           }
           tmp = parse.split(tmp[2]) || ""
           if (tmp[0] === "\n") continue
 
           if (tmp[0] === "=") value = tmp[1]
           if (typeof key !== "undefined" && typeof value !== "undefined") {
-            parse.disk(pre.join(""), value)
+            parse.disk(preString, value)
           }
           tmp = parse.split(tmp[2])
         }

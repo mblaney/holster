@@ -17,6 +17,7 @@ const createRateLimiter = opt => {
   const clients = new Map()
   const maxRequests = opt.maxRequestsPerMinute || 100
   const windowMs = opt.rateLimitWindow || 60000
+  const disconnectThreshold = opt.disconnectThreshold || 10
   // Check if test environment (mock-socket usage)
   const isTestEnv = opt.wss && opt.wss.constructor.name === "Server"
   let cleanupInterval = null
@@ -29,6 +30,10 @@ const createRateLimiter = opt => {
         data.lastCleanup = now
       }
       data.requests = data.requests.filter(time => now - time < windowMs)
+      // Reset throttle counts periodically
+      if (now - data.lastCleanup > windowMs * 10) {
+        data.throttleCount = 0
+      }
     }
   }
 
@@ -42,6 +47,7 @@ const createRateLimiter = opt => {
       const client = clients.get(clientId) || {
         requests: [],
         lastCleanup: now,
+        throttleCount: 0,
       }
 
       // Filter old requests
@@ -51,6 +57,9 @@ const createRateLimiter = opt => {
         // Calculate delay based on oldest request that will expire
         const oldestRequest = Math.min(...client.requests)
         const delay = windowMs - (now - oldestRequest)
+        // Increment throttle count and update client data
+        client.throttleCount = (client.throttleCount || 0) + 1
+        clients.set(clientId, client)
         return Math.max(0, delay)
       }
 
@@ -69,6 +78,17 @@ const createRateLimiter = opt => {
         time => now - time < windowMs,
       )
       return Math.max(0, maxRequests - validRequests.length)
+    },
+
+    getThrottleCount: clientId => {
+      const client = clients.get(clientId)
+      return client ? client.throttleCount || 0 : 0
+    },
+
+    shouldDisconnect: clientId => {
+      const client = clients.get(clientId)
+      if (!client) return false
+      return client.throttleCount >= disconnectThreshold
     },
 
     destroy: () => {
@@ -274,7 +294,11 @@ const Wire = opt => {
 
     if (ack) {
       // Also send request on the wire to check for updates.
-      send(request)
+      const sendResult = send(request)
+      if (sendResult && sendResult.err) {
+        cb({err: sendResult.err})
+        return
+      }
       cb({put: ack})
       return
     }
@@ -282,7 +306,11 @@ const Wire = opt => {
     store.get(lex, (err, ack) => {
       if (ack) {
         // Also send request on the wire to check for updates.
-        send(request)
+        const sendResult = send(request)
+        if (sendResult && sendResult.err) {
+          cb({err: sendResult.err})
+          return
+        }
         cb({put: ack, err: err})
         return
       }
@@ -290,7 +318,13 @@ const Wire = opt => {
       if (err) console.log(err)
 
       queue[track] = cb
-      send(request)
+      const sendResult = send(request)
+      if (sendResult && sendResult.err) {
+        cb({err: sendResult.err})
+        delete queue[track]
+        return
+      }
+
       // Respond to callback with null if no response.
       setTimeout(() => {
         const cb = queue[track]
@@ -344,12 +378,17 @@ const Wire = opt => {
 
         store.put(update.now, cb)
         // Also put data on the wire spec.
-        send(
+        const sendResult = send(
           JSON.stringify({
             "#": dup.track(utils.text.random(9)),
             put: data,
           }),
         )
+        // Handle queue overflow error
+        if (sendResult && sendResult.err) {
+          if (cb) cb(sendResult.err)
+          return
+        }
       },
       on: (lex, cb, _get, _opt) => {
         const soul = lex && lex["#"]
@@ -464,9 +503,19 @@ const Wire = opt => {
         const delay = rateLimiter.getDelay(clientId)
         // Log rate limiting activity and enforce stricter limits
         if (delay > 0) {
+          const throttleCount = rateLimiter.getThrottleCount(clientId)
           console.log(
-            `[HOLSTER-THROTTLE] Client ${clientId}: rate limit exceeded, delay would be ${delay}ms, dropping message`,
+            `[HOLSTER-THROTTLE] Client ${clientId}: rate limit exceeded, delay would be ${delay}ms, dropping message (throttle count: ${throttleCount})`,
           )
+          // Check if we should disconnect the bad actor
+          if (rateLimiter.shouldDisconnect(clientId)) {
+            console.error(
+              `[HOLSTER-DISCONNECT] Client ${clientId}: Disconnecting bad actor after ${throttleCount} throttle violations`,
+            )
+            ws.close(1008, "Rate limit violations - bad actor")
+            return
+          }
+
           // Send throttle warning back to client instead of processing
           ws.send(
             JSON.stringify({
@@ -516,6 +565,7 @@ const Wire = opt => {
   let throttleUntil = 0
   let messageQueue = []
   let queueProcessor = null
+  const maxQueueLength = opt.maxQueueLength || 1000
 
   const processQueue = () => {
     if (messageQueue.length === 0) {
@@ -580,14 +630,20 @@ const Wire = opt => {
 
   const send = data => {
     // Check if client is throttled or queue is active
-    const now = Date.now()
     if (clientThrottled || messageQueue.length > 0) {
+      if (messageQueue.length >= maxQueueLength) {
+        return {
+          err: `Message queue exceeded maximum length (${maxQueueLength}). Update query logic to request less data.`,
+          queueLength: messageQueue.length,
+          maxQueueLength: maxQueueLength,
+        }
+      }
+
       // Add message to queue instead of sending immediately
       messageQueue.push(data)
       console.log(
-        `[CLIENT-THROTTLED] Queuing message (queue length: ${messageQueue.length})`,
+        `Queuing message (queue length: ${messageQueue.length}/${maxQueueLength})`,
       )
-
       // Start queue processor if not already running
       if (!queueProcessor) {
         queueProcessor = setTimeout(processQueue, 100)
