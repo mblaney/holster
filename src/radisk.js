@@ -1,28 +1,41 @@
 import Radix from "./radix.js"
 import * as utils from "./utils.js"
 
-// ASCII character for end of text.
+// ASCII character for end of text
 const etx = String.fromCharCode(3)
-// ASCII character for enquiry.
+// ASCII character for enquiry
 const enq = String.fromCharCode(5)
-// ASCII character for unit separator.
+// ASCII character for unit separator
 const unit = String.fromCharCode(31)
 
 // Radisk provides access to a radix tree that is stored in the provided
-// opt.store interface.
+// opt.store interface
 const Radisk = opt => {
   var u
 
   // Multi-file cache for all parsed radix trees
   const cache = new Map()
+  // File listing cache to avoid repeated directory scans
+  let fileListCache = null
+  let fileListCacheTime = 0
+  const FILE_LIST_CACHE_TTL = 10000 // 10 seconds
   // Pending reads queue to avoid duplicate reads for the same key
   const pendingReads = new Map()
+
+  // Memory monitoring and cleanup
+  let lastMemoryCheck = 0
+  const MEMORY_CHECK_INTERVAL = 30000 // Check every 30 seconds
+  const HEAP_WARNING_THRESHOLD = 0.8 // Warn at 80% of max heap size
+  const HEAP_CLEANUP_THRESHOLD = 0.9 // Clean cache at 90% of max heap size
 
   if (!opt) opt = {}
   if (!opt.log) opt.log = console.log
   if (!opt.batch) opt.batch = 100 // Balanced batch size for performance
-  if (!opt.write) opt.write = 1 // Wait time before write in milliseconds.
-  if (!opt.size) opt.size = 1024 * 1024 // File size on disk, default 1MB.
+  if (!opt.write) opt.write = 1 // Wait time before write in milliseconds
+  if (!opt.size) opt.size = 1024 * 1024 // File size on disk, default 1MB
+  if (!opt.memoryLimit) opt.memoryLimit = 500 // Memory limit in MB
+  if (typeof opt.cache === "undefined") opt.cache = true
+
   if (!opt.store) {
     opt.log(
       "Radisk needs `store` interface with `{get: fn, put: fn, list: fn}`",
@@ -46,9 +59,39 @@ const Radisk = opt => {
   const perfLog = (operation, startTime, key, size) => {
     const duration = Date.now() - startTime
     if (duration > 1000) {
-      // Log operations taking more than 1000ms
       console.log(
         `[RADISK-SLOW] ${operation}: ${duration}ms for ${key}${size ? ` (${size} bytes)` : ""}`,
+      )
+    }
+  }
+
+  // Memory monitoring and cache cleanup
+  const checkMemoryUsage = () => {
+    const now = Date.now()
+    if (now - lastMemoryCheck < MEMORY_CHECK_INTERVAL) return
+    lastMemoryCheck = now
+
+    const memUsage = process.memoryUsage()
+    const heapUsed = memUsage.heapUsed
+    const heapTotal = memUsage.heapTotal
+    const maxHeapSize = opt.memoryLimit * 1024 * 1024
+    const heapUsageRatio = heapUsed / maxHeapSize
+
+    if (heapUsageRatio > HEAP_CLEANUP_THRESHOLD) {
+      const cacheSize = cache.size
+      console.log(
+        `[RADISK-MEMORY] High memory usage: ${Math.round(heapUsageRatio * 100)}% of heap limit. Clearing ${cacheSize} cached files.`,
+      )
+      cache.clear()
+      // Force garbage collection if available
+      if (global.gc) {
+        global.gc()
+      }
+      // Reset timer to avoid immediate re-check until GC has time to work
+      lastMemoryCheck = now + MEMORY_CHECK_INTERVAL
+    } else if (heapUsageRatio > HEAP_WARNING_THRESHOLD) {
+      console.log(
+        `[RADISK-MEMORY] Memory warning: ${Math.round(heapUsageRatio * 100)}% of heap limit used. Cache size: ${cache.size} files.`,
       )
     }
   }
@@ -100,6 +143,8 @@ const Radisk = opt => {
 
     // Otherwise store the value provided.
     radisk.batch(key, value)
+    // Check memory usage after writing to in-memory radix tree
+    checkMemoryUsage()
     if (cb) {
       radisk.batch.acks.push(cb)
     }
@@ -221,8 +266,6 @@ const Radisk = opt => {
   }
 
   radisk.write = (file, rad, cb) => {
-    // Invalidate cache entry for this file on write
-    cache.delete(file)
     const write = {
       text: "",
       limit: "",
@@ -291,13 +334,14 @@ const Radisk = opt => {
           }
 
           // Check multi-file cache first
-          if (cache.has(read.file)) {
+          if (opt.cache && cache.has(read.file)) {
             const cachedRadix = cache.get(read.file)
             read.value = cachedRadix(key)
-            if (typeof read.value !== "undefined") {
-              return cb(u, read.value)
-            }
+            // Return cached result (defined or undefined) since in-memory
+            // radix tree is authoritative
+            return cb(u, read.value)
           }
+
           radisk.parse(read.file, read.it)
           return
         }
@@ -310,14 +354,42 @@ const Radisk = opt => {
       it: (err, disk) => {
         if (err) opt.log(err)
         if (disk) {
-          // Store in multi-file cache
-          cache.set(read.file, disk)
+          if (opt.cache) {
+            cache.set(read.file, disk)
+            checkMemoryUsage() // Check memory usage after adding to cache
+          }
           read.value = disk(key)
         }
         cb(err, read.value)
       },
     }
-    opt.store.list(read.lex)
+    const now = Date.now()
+    if (
+      opt.cache &&
+      fileListCache &&
+      now - fileListCacheTime < FILE_LIST_CACHE_TTL
+    ) {
+      // Use cached file list
+      fileListCache.forEach(file => read.lex(file))
+      read.lex() // Signal end of list
+    } else {
+      // Refresh cache
+      const files = []
+      const originalLex = read.lex
+      read.lex = file => {
+        if (file) files.push(file)
+        return originalLex(file)
+      }
+
+      opt.store.list(file => {
+        read.lex(file)
+        if (!file && opt.cache) {
+          // End of list - cache the results
+          fileListCache = files
+          fileListCacheTime = now
+        }
+      })
+    }
   }
 
   // Let us start by assuming we are the only process that is

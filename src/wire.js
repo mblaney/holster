@@ -468,7 +468,7 @@ const Wire = opt => {
       )
 
       ws.on("error", error => {
-        console.error("WebSocket error:", error)
+        console.log("WebSocket error:", error)
         connectionManager.remove(ws)
       })
 
@@ -509,7 +509,7 @@ const Wire = opt => {
           )
           // Check if we should disconnect the bad actor
           if (rateLimiter.shouldDisconnect(clientId)) {
-            console.error(
+            console.log(
               `[HOLSTER-DISCONNECT] Client ${clientId}: Disconnecting bad actor after ${throttleCount} throttle violations`,
             )
             ws.close(1008, "Rate limit violations - bad actor")
@@ -681,7 +681,7 @@ const Wire = opt => {
       }
 
       ws.onerror = e => {
-        console.error(e)
+        console.log(e)
       }
       ws.onmessage = async m => {
         const msg = JSON.parse(m.data)
