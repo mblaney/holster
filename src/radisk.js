@@ -67,6 +67,8 @@ const Radisk = opt => {
 
   // Memory monitoring and cache cleanup
   const checkMemoryUsage = () => {
+    if (typeof process === "undefined" || !process.memoryUsage) return
+
     const now = Date.now()
     if (now - lastMemoryCheck < MEMORY_CHECK_INTERVAL) return
     lastMemoryCheck = now
