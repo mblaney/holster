@@ -8,6 +8,7 @@ describe("radisk", () => {
     write: 1,
     batch: 2,
     size: 100,
+    cache: false,
     store: {
       get: (file, cb) => {
         cb(null, puts[file])
