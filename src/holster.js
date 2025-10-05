@@ -67,12 +67,22 @@ const Holster = opt => {
             for (const key of Object.keys(msg.put[soul])) {
               const id = utils.rel.is(msg.put[soul][key])
               if (id) {
-                const data = await new Promise(res => {
-                  const _ctxid = utils.text.random()
-                  allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
-                  api(_ctxid).next(null, res, _opt)
-                })
-                msg.put[soul][key] = data
+                // Due to message queuing, the related node might not be available yet
+                // Retry with delays if we get null
+                const attemptRead = async (retries = 0) => {
+                  const data = await new Promise(res => {
+                    const _ctxid = utils.text.random()
+                    allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
+                    api(_ctxid).next(null, res, _opt)
+                  })
+                  if (data !== null || retries >= 5) {
+                    return data
+                  }
+                  // Data not ready, retry after delay
+                  await new Promise(resolve => setTimeout(resolve, 50))
+                  return attemptRead(retries + 1)
+                }
+                msg.put[soul][key] = await attemptRead()
               }
             }
             ack(msg.put[soul])
@@ -547,8 +557,57 @@ const Holster = opt => {
         allctx.set(ctxid, {chain: [{item: item, soul: soul}], on: true})
         // Map the user's callback because it can also be passed to off,
         // so need a reference to it to compare them.
-        map.set(cb, () => api(ctxid).next(null, cb, _opt))
-        // Check if item is a rel and add event listener for the node.
+        // Create a new context for each listener invocation to avoid mutation
+        map.set(cb, () => {
+          // When listener fires, re-check if the item is now a rel.
+          wire.get(
+            {"#": soul, ".": item},
+            msg => {
+              const current = msg.put && msg.put[soul] && msg.put[soul][item]
+              const id = utils.rel.is(current)
+              if (id) {
+                // It's a rel, read the related node. It might not be in the graph
+                // yet when the listener fires, so we retry with delays.
+                const attemptRead = (retries = 0) => {
+                  wire.get(
+                    {"#": id},
+                    relMsg => {
+                      if (relMsg.put && relMsg.put[id]) {
+                        delete relMsg.put[id]._
+                        delete relMsg.put[id][utils.userPublicKey]
+                        delete relMsg.put[id][utils.userSignature]
+                        cb(relMsg.put[id])
+                      } else if (retries < 5) {
+                        // Data not ready yet, retry after a delay
+                        setTimeout(() => attemptRead(retries + 1), 50)
+                      } else {
+                        // Give up after retries
+                        cb(null)
+                      }
+                    },
+                    _opt,
+                  )
+                }
+                attemptRead()
+              } else {
+                // It's a direct property or null
+                cb(current !== undefined ? current : null)
+              }
+            },
+            _opt,
+          )
+        })
+
+        // Register listener immediately to avoid missing updates due to
+        // queueing. Initially register the soul without _get, then update if
+        // it's a rel.
+        let initialLex
+        if (lex) initialLex = utils.obj.put(lex, "#", soul)
+        else initialLex = {"#": soul, ".": item}
+        wire.on(initialLex, map.get(cb), false, _opt)
+
+        // Check if item is a rel and update listener if needed.
+        // This happens async but the listener is already registered above.
         wire.get(
           {"#": soul, ".": item},
           msg => {
@@ -560,13 +619,18 @@ const Holster = opt => {
             const current = msg.put && msg.put[soul] && msg.put[soul][item]
             const id = utils.rel.is(current)
             if (id) {
-              if (lex) lex = utils.obj.put(lex, "#", id)
-              else lex = {"#": id, ".": null}
-            } else {
-              if (lex) lex = utils.obj.put(lex, "#", soul)
-              else lex = {"#": soul, ".": item}
+              // It's a rel, need to switch listener to the related node
+              // First remove the initial listener
+              wire.off(initialLex, map.get(cb))
+              // Then add listener on the related node
+              let relLex
+              if (lex) relLex = utils.obj.put(lex, "#", id)
+              else relLex = {"#": id, ".": null}
+              wire.on(relLex, map.get(cb), _get, _opt)
+            } else if (_get) {
+              // Not a rel, but _get was requested, so trigger callback.
+              map.get(cb)()
             }
-            wire.on(lex, map.get(cb), _get, _opt)
           },
           _opt,
         )

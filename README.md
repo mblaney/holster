@@ -1,12 +1,17 @@
-Holster is a service for synchronising data between devices using Node,
-Deno, Bun or the browser.
+Holster is a real-time data synchronisation service that seamlessly connects
+devices using Node.js, Deno, Bun or the browser. Built with modern ES modules,
+it features end-to-end encryption, intelligent conflict resolution, and
+cross-platform compatibility.
+
+✨ Real-time sync across all connected devices\
+🔐 Built-in encryption with user authentication\
+⚡ Zero configuration with smart performance optimisation\
+🌐 Universal compatibility - works everywhere JavaScript runs
 
 Try it out at [holster.haza.website](https://holster.haza.website)!
 
-It is a port of [GunDB](https://gun.eco), following
-[Porting Gun](https://github.com/gundb/port) and is implemented as JavaScript
-modules so that it can run in any environment. A build version of Holster is
-also provided using [esbuild](https://esbuild.github.io), to run in production.
+A build version of Holster is also provided using
+[esbuild](https://esbuild.github.io), to run in production.
 
 Check out the [Github Wiki](https://github.com/mblaney/holster/wiki) for how
 to get started using the API, and for more information.

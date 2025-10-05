@@ -35,11 +35,12 @@ describe("holster.user.on", () => {
     user.get("key").put("value", err => {
       assert.equal(err, null)
 
-      user.get("key").on(data => {
+      const callback = data => {
         assert.equal(data, "update")
-        user.get("key").off()
+        user.get("key").off(callback)
         done()
-      })
+      }
+      user.get("key").on(callback)
 
       user.get("key").put("update", err => {
         assert.equal(err, null)
@@ -64,15 +65,16 @@ describe("holster.user.on", () => {
       assert.equal(err, null)
 
       let first = true
-      user.get("key3").on(data => {
+      const callback = data => {
         if (first) {
           assert.equal(data, "update1")
         } else {
           assert.equal(data, "update2")
-          user.get("key3").off()
+          user.get("key3").off(callback)
           done()
         }
-      })
+      }
+      user.get("key3").on(callback)
 
       user.get("key3").put("update1", err => {
         assert.equal(err, null)
@@ -103,11 +105,13 @@ describe("holster.user.on", () => {
     setTimeout(async () => {
       let count = 0
       for (let i = 0; i < 5; i++) {
-        user.get("for" + i).on(data => {
-          assert.equal(data, "update" + i)
-          user.get("for" + i).off()
+        const idx = i // Capture value
+        const callback = data => {
+          assert.equal(data, "update" + idx)
+          user.get("for" + idx).off(callback)
           count++
-        })
+        }
+        user.get("for" + idx).on(callback)
       }
 
       setTimeout(async () => {
@@ -130,11 +134,12 @@ describe("holster.user.on", () => {
       assert.equal(err, null)
 
       setTimeout(() => {
-        user.get("key4").on(data => {
+        const callback = data => {
           assert.equal(data, "value4")
-          user.get("key4").off()
+          user.get("key4").off(callback)
           done()
-        }, true)
+        }
+        user.get("key4").on(callback, true)
       }, 100)
     })
   })
@@ -147,14 +152,12 @@ describe("holster.user.on", () => {
       .put("ok", err => {
         assert.equal(err, null)
 
-        user
-          .get("hello")
-          .next("world!")
-          .on(data => {
-            assert.equal(data, "update")
-            user.get("hello").next("world!").off()
-            done()
-          })
+        const callback = data => {
+          assert.equal(data, "update")
+          user.get("hello").next("world!").off(callback)
+          done()
+        }
+        user.get("hello").next("world!").on(callback)
 
         setTimeout(() => {
           user
@@ -181,10 +184,12 @@ describe("holster.user.on", () => {
         number: 42,
       }
 
-      user.get("plain").on(data => {
+      const callback = data => {
         assert.deepEqual(data, update)
+        user.get("plain").off(callback)
         done()
-      })
+      }
+      user.get("plain").on(callback)
 
       setTimeout(() => {
         user.get("plain").put(update, err => {
@@ -212,17 +217,18 @@ describe("holster.user.on", () => {
         },
       }
 
-      user.get("nested").on(data => {
+      const parentCallback = data => {
         assert.deepEqual(data, update)
-      })
+      }
+      user.get("nested").on(parentCallback)
 
-      user
-        .get("nested")
-        .next("child")
-        .on(data => {
-          assert.deepEqual(data, update.child)
-          done()
-        })
+      const childCallback = data => {
+        assert.deepEqual(data, update.child)
+        user.get("nested").off(parentCallback)
+        user.get("nested").next("child").off(childCallback)
+        done()
+      }
+      user.get("nested").next("child").on(childCallback)
 
       setTimeout(() => {
         user.get("nested").put(update, err => {
