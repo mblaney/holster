@@ -178,6 +178,9 @@ const Wire = opt => {
   // Track references we want but don't have yet
   const pendingReferences = new Set()
 
+  // Track pending timeouts that should start when message is sent
+  const pendingTimeouts = new Map()
+
   // Helper to check if we have a soul in memory or storage
   const hasSoul = async soul => {
     if (graph[soul]) return true
@@ -318,24 +321,20 @@ const Wire = opt => {
       if (err) console.log(err)
 
       queue[track] = cb
+
+      // Store timeout config to start after message is sent from queue
+      pendingTimeouts.set(track, {
+        lex: lex,
+        wait: _opt.wait || 100,
+      })
+
       const sendResult = send(request)
       if (sendResult && sendResult.err) {
         cb({err: sendResult.err})
         delete queue[track]
+        pendingTimeouts.delete(track)
         return
       }
-
-      // Respond to callback with null if no response.
-      setTimeout(() => {
-        const cb = queue[track]
-        if (cb) {
-          const id = lex["#"]
-          const ack = {[id]: null}
-          if (typeof lex["."] === "string") ack[id] = {[lex["."]]: null}
-          cb({put: ack})
-          delete queue[track]
-        }
-      }, _opt.wait || 100)
     })
   }
 
@@ -384,7 +383,7 @@ const Wire = opt => {
             put: data,
           }),
         )
-        // Handle queue overflow error
+        // Handle queue overflow error.
         if (sendResult && sendResult.err) {
           if (cb) cb(sendResult.err)
           return
@@ -432,6 +431,28 @@ const Wire = opt => {
     }
 
     const send = (data, isBinary) => {
+      // Start timeout for this message now that it's being sent
+      const msg = JSON.parse(data)
+      const trackId = msg["#"]
+      if (trackId && pendingTimeouts.has(trackId)) {
+        const timeoutConfig = pendingTimeouts.get(trackId)
+        pendingTimeouts.delete(trackId)
+
+        // Respond to callback with null if no response.
+        timeoutConfig.timeoutId = setTimeout(() => {
+          const cb = queue[trackId]
+          if (cb) {
+            const id = timeoutConfig.lex["#"]
+            const ack = {[id]: null}
+            if (typeof timeoutConfig.lex["."] === "string") {
+              ack[id] = {[timeoutConfig.lex["."]]: null}
+            }
+            cb({put: ack})
+            delete queue[trackId]
+          }
+        }, timeoutConfig.wait)
+      }
+
       clients().forEach(client => {
         if (client && client.readyState === WebSocket.OPEN) {
           client.send(data, {binary: isBinary})
@@ -589,6 +610,28 @@ const Wire = opt => {
     // Process next message in queue
     const data = messageQueue.shift()
     sendToPeers(data)
+
+    // Start timeout for this message now that it's been sent
+    const msg = JSON.parse(data)
+    const trackId = msg["#"]
+    if (trackId && pendingTimeouts.has(trackId)) {
+      const timeoutConfig = pendingTimeouts.get(trackId)
+      pendingTimeouts.delete(trackId)
+
+      // Respond to callback with null if no response.
+      timeoutConfig.timeoutId = setTimeout(() => {
+        const cb = queue[trackId]
+        if (cb) {
+          const id = timeoutConfig.lex["#"]
+          const ack = {[id]: null}
+          if (typeof timeoutConfig.lex["."] === "string") {
+            ack[id] = {[timeoutConfig.lex["."]]: null}
+          }
+          cb({put: ack})
+          delete queue[trackId]
+        }
+      }, timeoutConfig.wait)
+    }
 
     // Schedule processing of next message if queue not empty
     if (messageQueue.length > 0) {
