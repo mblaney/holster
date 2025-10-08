@@ -353,30 +353,30 @@ const Wire = opt => {
         // used whereas wire spec needs to handle clock skew for updates
         // across the network.
         const update = await Ham.mix(data, graph, opt.secure, listen)
-        const none = Object.keys(update.now).length === 0
-        if (none) {
-          // Nothing to do.
-          cb(null)
-          return
-        }
 
-        if (!(await check(update.now, send, cb))) return
+        if (Object.keys(update.now).length !== 0) {
+          if (!(await check(update.now, send, cb))) return
 
-        // Seed pendingReferences with any new references from API calls
-        for (const [soul, node] of Object.entries(update.now)) {
-          if (node && typeof node === "object") {
-            for (const [key, value] of Object.entries(node)) {
-              const soulId = utils.rel.is(value)
-              if (soulId) {
-                // Add referenced soul to pending list
-                pendingReferences.add(soulId)
+          // Seed pendingReferences with any new references from API calls
+          for (const [soul, node] of Object.entries(update.now)) {
+            if (node && typeof node === "object") {
+              for (const [key, value] of Object.entries(node)) {
+                const soulId = utils.rel.is(value)
+                if (soulId) {
+                  // Add referenced soul to pending list
+                  pendingReferences.add(soulId)
+                }
               }
             }
           }
+
+          store.put(update.now, cb)
+        } else {
+          // No local update needed, but still callback
+          if (cb) cb(null)
         }
 
-        store.put(update.now, cb)
-        // Also put data on the wire spec.
+        // Always put data on the wire spec even if no local update needed
         const sendResult = send(
           JSON.stringify({
             "#": dup.track(utils.text.random(9)),
@@ -608,29 +608,34 @@ const Wire = opt => {
     }
 
     // Process next message in queue
-    const data = messageQueue.shift()
-    sendToPeers(data)
+    const data = messageQueue[0]
+    const sent = sendToPeers(data)
 
-    // Start timeout for this message now that it's been sent
-    const msg = JSON.parse(data)
-    const trackId = msg["#"]
-    if (trackId && pendingTimeouts.has(trackId)) {
-      const timeoutConfig = pendingTimeouts.get(trackId)
-      pendingTimeouts.delete(trackId)
+    if (sent) {
+      // Only remove from queue if successfully sent
+      messageQueue.shift()
 
-      // Respond to callback with null if no response.
-      timeoutConfig.timeoutId = setTimeout(() => {
-        const cb = queue[trackId]
-        if (cb) {
-          const id = timeoutConfig.lex["#"]
-          const ack = {[id]: null}
-          if (typeof timeoutConfig.lex["."] === "string") {
-            ack[id] = {[timeoutConfig.lex["."]]: null}
+      // Start timeout for this message now that it's been sent
+      const msg = JSON.parse(data)
+      const trackId = msg["#"]
+      if (trackId && pendingTimeouts.has(trackId)) {
+        const timeoutConfig = pendingTimeouts.get(trackId)
+        pendingTimeouts.delete(trackId)
+
+        // Respond to callback with null if no response.
+        timeoutConfig.timeoutId = setTimeout(() => {
+          const cb = queue[trackId]
+          if (cb) {
+            const id = timeoutConfig.lex["#"]
+            const ack = {[id]: null}
+            if (typeof timeoutConfig.lex["."] === "string") {
+              ack[id] = {[timeoutConfig.lex["."]]: null}
+            }
+            cb({put: ack})
+            delete queue[trackId]
           }
-          cb({put: ack})
-          delete queue[trackId]
-        }
-      }, timeoutConfig.wait)
+        }, timeoutConfig.wait)
+      }
     }
 
     // Schedule processing of next message if queue not empty
@@ -643,9 +648,11 @@ const Wire = opt => {
   }
 
   const sendToPeers = data => {
+    let sentToAtLeastOne = false
     peers.forEach(peer => {
       if (peer && peer.readyState === WebSocket.OPEN) {
         peer.send(data)
+        sentToAtLeastOne = true
       } else {
         const retryHandler = peer._retryHandler || createRetryHandler()
         peer._retryHandler = retryHandler
@@ -663,6 +670,7 @@ const Wire = opt => {
         }
       }
     })
+    return sentToAtLeastOne
   }
 
   const send = data => {

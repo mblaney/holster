@@ -568,25 +568,19 @@ const Holster = opt => {
               if (id) {
                 // It's a rel, read the related node. It might not be in the graph
                 // yet when the listener fires, so we retry with delays.
-                const attemptRead = (retries = 0) => {
-                  wire.get(
-                    {"#": id},
-                    relMsg => {
-                      if (relMsg.put && relMsg.put[id]) {
-                        delete relMsg.put[id]._
-                        delete relMsg.put[id][utils.userPublicKey]
-                        delete relMsg.put[id][utils.userSignature]
-                        cb(relMsg.put[id])
-                      } else if (retries < 5) {
-                        // Data not ready yet, retry after a delay
-                        setTimeout(() => attemptRead(retries + 1), 50)
-                      } else {
-                        // Give up after retries
-                        cb(null)
-                      }
-                    },
-                    _opt,
-                  )
+                const attemptRead = async (retries = 0) => {
+                  const data = await new Promise(res => {
+                    const _ctxid = utils.text.random()
+                    allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
+                    api(_ctxid).next(null, res, _opt)
+                  })
+                  if (data !== null || retries >= 5) {
+                    cb(data)
+                  } else {
+                    // Data not ready, retry after delay
+                    await new Promise(resolve => setTimeout(resolve, 50))
+                    attemptRead(retries + 1)
+                  }
                 }
                 attemptRead()
               } else {
