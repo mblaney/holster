@@ -15,7 +15,7 @@ if (typeof globalThis.WebSocket === "undefined") {
 // Rate limiting with throttling
 const createRateLimiter = isTestEnv => {
   const clients = new Map()
-  const maxRequests = 300 // 5 requests per second
+  const maxRequests = 1000 // requests per minute
   const windowMs = 60000 // 1 minute window
   const disconnectThreshold = 10 // Disconnect after 10 violations
   let cleanupInterval = null
@@ -277,6 +277,18 @@ const Wire = opt => {
         )
       })
     }
+
+    // Always broadcast original data to other peers even if no local update
+    const sendResult = send(
+      JSON.stringify({
+        "#": dup.track(utils.text.random(9)),
+        put: msg.put,
+      }),
+    )
+    if (sendResult && sendResult.err) {
+      console.log(`Error broadcasting put: ${sendResult.err}`)
+    }
+
     if (Object.keys(update.defer).length) {
       setTimeout(() => put({put: update.defer}, send), update.wait)
     }
@@ -640,8 +652,8 @@ const Wire = opt => {
 
     // Schedule processing of next message if queue not empty
     if (messageQueue.length > 0) {
-      // Add delay between messages to respect rate limits (300 req/min = 200ms)
-      queueProcessor = setTimeout(processQueue, 250)
+      // Add delay between messages to respect rate limit
+      queueProcessor = setTimeout(processQueue, 100)
     } else {
       queueProcessor = null
     }
@@ -685,7 +697,7 @@ const Wire = opt => {
     messageQueue.push(data)
     // Start queue processor if not already running
     if (!queueProcessor) {
-      queueProcessor = setTimeout(processQueue, 250)
+      queueProcessor = setTimeout(processQueue, 100)
     }
   }
   if (!(opt.peers instanceof Array)) {
