@@ -264,32 +264,27 @@ const Wire = opt => {
   const put = async (msg, send) => {
     // Store updates returned from Ham.mix and defer updates if required.
     const update = await Ham.mix(msg.put, graph, opt.secure, listen)
-    if (Object.keys(update.now).length) {
-      if (!(await check(update.now, send))) return
-
-      store.put(update.now, err => {
-        send(
-          JSON.stringify({
-            "#": dup.track(utils.text.random(9)),
-            "@": msg["#"],
-            err: err,
-          }),
-        )
-      })
+    if (Object.keys(update.now).length === 0) {
+      // No updates to store, check deferred.
+      if (Object.keys(update.defer).length !== 0) {
+        setTimeout(() => put({put: update.defer}, send), update.wait)
+      }
+      return
     }
 
-    // Always broadcast original data to other peers even if no local update
-    const sendResult = send(
-      JSON.stringify({
-        "#": dup.track(utils.text.random(9)),
-        put: msg.put,
-      }),
-    )
-    if (sendResult && sendResult.err) {
-      console.log(`Error broadcasting put: ${sendResult.err}`)
-    }
+    if (!(await check(update.now, send))) return
 
-    if (Object.keys(update.defer).length) {
+    store.put(update.now, err => {
+      send(
+        JSON.stringify({
+          "#": dup.track(utils.text.random(9)),
+          "@": msg["#"],
+          err: err,
+        }),
+      )
+    })
+
+    if (Object.keys(update.defer).length !== 0) {
       setTimeout(() => put({put: update.defer}, send), update.wait)
     }
   }
@@ -365,28 +360,28 @@ const Wire = opt => {
         // used whereas wire spec needs to handle clock skew for updates
         // across the network.
         const update = await Ham.mix(data, graph, opt.secure, listen)
+        if (Object.keys(update.now).length === 0) {
+          // No updates, still respond to callback.
+          if (cb) cb(null)
+          return
+        }
 
-        if (Object.keys(update.now).length !== 0) {
-          if (!(await check(update.now, send, cb))) return
+        if (!(await check(update.now, send, cb))) return
 
-          // Seed pendingReferences with any new references from API calls
-          for (const [soul, node] of Object.entries(update.now)) {
-            if (node && typeof node === "object") {
-              for (const [key, value] of Object.entries(node)) {
-                const soulId = utils.rel.is(value)
-                if (soulId) {
-                  // Add referenced soul to pending list
-                  pendingReferences.add(soulId)
-                }
+        // Seed pendingReferences with any new references from API calls
+        for (const [soul, node] of Object.entries(update.now)) {
+          if (node && typeof node === "object") {
+            for (const [key, value] of Object.entries(node)) {
+              const soulId = utils.rel.is(value)
+              if (soulId) {
+                // Add referenced soul to pending list
+                pendingReferences.add(soulId)
               }
             }
           }
-
-          store.put(update.now, cb)
-        } else {
-          // No local update needed, but still callback
-          if (cb) cb(null)
         }
+
+        store.put(update.now, cb)
 
         // Always put data on the wire spec even if no local update needed
         const sendResult = send(
