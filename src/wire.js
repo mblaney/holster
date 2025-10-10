@@ -773,7 +773,6 @@ const Wire = opt => {
             put(filteredMsg, send)
           }
         }
-        send(m.data)
 
         const id = msg["@"]
         const cb = queue[id]
