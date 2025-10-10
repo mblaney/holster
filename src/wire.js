@@ -267,7 +267,10 @@ const Wire = opt => {
     if (Object.keys(update.now).length === 0) {
       // No updates to store, check deferred.
       if (Object.keys(update.defer).length !== 0) {
-        setTimeout(() => put({put: update.defer}, send), update.wait)
+        setTimeout(
+          () => put({put: update.defer, "#": msg["#"]}, send),
+          update.wait,
+        )
       }
       return
     }
@@ -285,7 +288,10 @@ const Wire = opt => {
     })
 
     if (Object.keys(update.defer).length !== 0) {
-      setTimeout(() => put({put: update.defer}, send), update.wait)
+      setTimeout(
+        () => put({put: update.defer, "#": msg["#"]}, send),
+        update.wait,
+      )
     }
   }
 
@@ -768,12 +774,11 @@ const Wire = opt => {
           }
           // Store filtered data if any
           if (Object.keys(filteredPut).length > 0) {
-            // Create filtered message for Ham.mix
-            const filteredMsg = {put: filteredPut}
+            // Create filtered message for Ham.mix with original message ID
+            const filteredMsg = {put: filteredPut, "#": msg["#"]}
             put(filteredMsg, send)
           }
         }
-        send(m.data)
 
         const id = msg["@"]
         const cb = queue[id]
