@@ -15,7 +15,7 @@ if (typeof globalThis.WebSocket === "undefined") {
 // Rate limiting with throttling
 const createRateLimiter = isTestEnv => {
   const clients = new Map()
-  const maxRequests = 1000 // requests per minute
+  const maxRequests = 1500 // requests per minute
   const windowMs = 60000 // 1 minute window
   const disconnectThreshold = 10 // Disconnect after 10 violations
   let cleanupInterval = null
@@ -654,7 +654,7 @@ const Wire = opt => {
     // Schedule processing of next message if queue not empty
     if (messageQueue.length > 0) {
       // Add delay between messages to respect rate limit
-      queueProcessor = setTimeout(processQueue, 100)
+      queueProcessor = setTimeout(processQueue, 50)
     } else {
       queueProcessor = null
     }
@@ -698,7 +698,7 @@ const Wire = opt => {
     messageQueue.push(data)
     // Start queue processor if not already running
     if (!queueProcessor) {
-      queueProcessor = setTimeout(processQueue, 100)
+      queueProcessor = setTimeout(processQueue, 50)
     }
   }
   if (!(opt.peers instanceof Array)) {

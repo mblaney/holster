@@ -18,11 +18,23 @@ to get started using the API, and for more information.
 
 ### Quick Start
 
-- Clone this repo and run `npm install`.
-- Run the server with `node src/index.js`.
+- Clone this repo
+
+#### Then using Docker
+
+- Run `docker build -t holster .` to build the image
+- Run `docker run -p 3000:3000 -p 8765:8765 holster` to start the server
+
+#### Or run locally
+
+- Run `npm install`
+- Run the server with `node src/index.js`
+
+#### Once the server is running
+
 - Open `http://localhost:3000/examples/index.html` in the browser.
 - You will then also have access to the Holster API via the `holster` object in
-the console.
+the console
 
 ### Development
 
