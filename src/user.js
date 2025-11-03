@@ -1,6 +1,7 @@
 import * as utils from "./utils.js"
 import Wire from "./wire.js"
 import SEA from "./sea.js"
+import {userPublicKey, userSignature} from "./utils.js"
 
 const User = (opt, wire) => {
   if (!wire) wire = Wire(opt)
@@ -55,15 +56,12 @@ const User = (opt, wire) => {
             const salt = utils.text.random(64)
             const work = await SEA.work(newPassword, salt)
             const enc = await SEA.encrypt(dec, work)
-            // Put all fields so that verification applies to the whole node.
+            // Only update the auth property with the new password encryption.
             const update = {
-              username: username,
-              pub: data.pub,
-              epub: data.epub,
               auth: JSON.stringify({enc: enc, salt: salt}),
             }
-            const signed = await SEA.sign(update, user.is)
-            const graph = utils.graph(pub, signed.m, signed.s, data.pub)
+            const propertySignatures = await SEA.signProperties(update, user.is)
+            const graph = utils.graph(pub, update, propertySignatures, data.pub)
             wire.put(graph, err => {
               if (err) {
                 done(`error putting ${update} on ${pub}: ${err}`)
@@ -74,9 +72,51 @@ const User = (opt, wire) => {
             return
           }
 
+          // Migrate old per-node signatures to per-property signatures
+          // Check if data has per-property signatures
+          if (
+            !data._ ||
+            !data._["s"] ||
+            Object.keys(data._["s"]).length === 0
+          ) {
+            // Data has old per-node signatures, migrate to per-property
+            // Copy all properties from existing data, excluding metadata
+            const migrationData = {}
+            for (const key of Object.keys(data)) {
+              if (
+                key !== "_" &&
+                key !== userPublicKey &&
+                key !== userSignature
+              ) {
+                migrationData[key] = data[key]
+              }
+            }
+            // Sign each property individually
+            const propertySignatures = await SEA.signProperties(
+              migrationData,
+              user.is,
+            )
+            const graph = utils.graph(
+              pub,
+              migrationData,
+              propertySignatures,
+              data.pub,
+            )
+            wire.put(graph, err => {
+              if (err) {
+                // Log migration error but don't fail authentication
+                console.log(
+                  `warning: failed to migrate signatures on login: ${err}`,
+                )
+              }
+              done(null)
+            })
+            return
+          }
+
           return done(null)
         },
-        {wait: 1000},
+        {wait: 5000},
       )
     }
 
@@ -103,7 +143,7 @@ const User = (opt, wire) => {
         pubs = Object.keys(data)
         next()
       },
-      {wait: 1000},
+      {wait: 5000},
     )
   }
 
@@ -160,8 +200,9 @@ const User = (opt, wire) => {
           }
 
           const pub = "~" + pair.pub
-          const signed = await SEA.sign(data, pair)
-          const graph = utils.graph(pub, signed.m, signed.s, pair.pub)
+          // Sign each property individually for new account
+          const propertySignatures = await SEA.signProperties(data, pair)
+          const graph = utils.graph(pub, data, propertySignatures, pair.pub)
           wire.put(graph, err => {
             creating = false
             if (err) {
@@ -181,7 +222,7 @@ const User = (opt, wire) => {
             })
           })
         },
-        {wait: 1000},
+        {wait: 5000},
       )
     },
     auth: (username, password, cb) => {
@@ -318,9 +359,10 @@ const User = (opt, wire) => {
         }
 
         const data = {username: null, pub: null, epub: null, auth: null}
-        const signed = await SEA.sign(data, user.is)
+        // Sign each property individually for account deletion
+        const propertySignatures = await SEA.signProperties(data, user.is)
         const pub = "~" + user.is.pub
-        const graph = utils.graph(pub, signed.m, signed.s, user.is.pub)
+        const graph = utils.graph(pub, data, propertySignatures, user.is.pub)
         wire.put(graph, err => {
           if (err) {
             ack(`error putting null on ${pub}: ${err}`)

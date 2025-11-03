@@ -16,6 +16,7 @@ const Get = (lex, graph) => {
   if (!graph[soul]) return
 
   const node = {_: {"#": soul, ">": {}}}
+  let signatures = {}
 
   if (typeof lex["."] === "string") {
     const key = lex["."]
@@ -23,13 +24,22 @@ const Get = (lex, graph) => {
 
     node[key] = graph[soul][key]
     node._[">"][key] = graph[soul]._[">"][key]
+    if (graph[soul]._["s"] && graph[soul]._["s"][key]) {
+      signatures[key] = graph[soul]._["s"][key]
+    }
   } else {
     for (const key of Object.keys(graph[soul])) {
       if (match(lex["."], key)) {
         node[key] = graph[soul][key]
         node._[">"][key] = graph[soul]._[">"][key]
+        if (graph[soul]._["s"] && graph[soul]._["s"][key]) {
+          signatures[key] = graph[soul]._["s"][key]
+        }
       }
     }
+  }
+  if (Object.keys(signatures).length > 0) {
+    node._["s"] = signatures
   }
   return {[soul]: node}
 }

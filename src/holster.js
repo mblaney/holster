@@ -97,8 +97,9 @@ const Holster = opt => {
 
     const graph = async (soul, data, userctx, cb) => {
       if (userctx) {
-        const signed = await SEA.sign(data, userctx)
-        return utils.graph(soul, signed.m, signed.s, userctx.pub)
+        // Sign each property individually
+        const propertySignatures = await SEA.signProperties(data, userctx)
+        return utils.graph(soul, data, propertySignatures, userctx.pub)
       }
 
       if (opt.secure) {
@@ -151,12 +152,8 @@ const Holster = opt => {
         // Found a soul that needs resolving, need the previous context
         // (ie the parent node) to find a soul relation for it.
         const {item, soul} = ctx.chain[i - 1]
-        // If this is a user context or using secure mode then need to get the
-        // whole node for verification.
-        const lex =
-          ctx.user || opt.secure ? {"#": soul} : {"#": soul, ".": item}
         wire.get(
-          lex,
+          {"#": soul, ".": item},
           async msg => {
             if (msg.err) {
               if (ctx.user || opt.secure) {
@@ -384,10 +381,7 @@ const Holster = opt => {
           // When result is true data is a property to put on the current soul.
           // Need to check if item is a rel and also set the node to null. (This
           // applies for any update from a rel to a property, not just null.)
-          // If using secure mode need to get the whole node for verification.
-          const lex =
-            ctx.user || opt.secure ? {"#": soul} : {"#": soul, ".": item}
-          wire.get(lex, async msg => {
+          wire.get({"#": soul, ".": item}, async msg => {
             if (msg.err) {
               _ack(`error getting ${soul}: ${msg.err}`)
               return
@@ -452,10 +446,7 @@ const Holster = opt => {
 
         // Otherwise put the data using the keys returned in result.
         // Need to check if a rel has already been added on the current node.
-        // If using secure mode need to get the whole node for verification.
-        const lex =
-          ctx.user || opt.secure ? {"#": soul} : {"#": soul, ".": item}
-        wire.get(lex, async msg => {
+        wire.get({"#": soul, ".": item}, async msg => {
           if (msg.err) {
             _ack(`error getting ${soul}.${item}: ${msg.err}`)
             return

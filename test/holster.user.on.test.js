@@ -31,18 +31,46 @@ describe("holster.user.on", () => {
   })
 
   test("on for property then update - event", (t, done) => {
-    // The property needs to exist before it can be listend to for updates.
+    // Listener doesn't get called for initial put.
+    const callback = data => {
+      assert.equal(data, "update")
+      user.get("key").off(callback)
+      done()
+    }
+    user.get("key").on(callback)
+
     user.get("key").put("value", err => {
       assert.equal(err, null)
 
-      const callback = data => {
-        assert.equal(data, "update")
-        user.get("key").off(callback)
-        done()
-      }
-      user.get("key").on(callback)
-
       user.get("key").put("update", err => {
+        assert.equal(err, null)
+      })
+    })
+  })
+
+  test("on for property then update - two listeners", (t, done) => {
+    let done1 = false
+    let done2 = false
+
+    const callback1 = data => {
+      assert.equal(data, "update")
+      user.get("two").off(callback1)
+      if (done2) done()
+      else done1 = true
+    }
+    user.get("two").on(callback1)
+
+    const callback2 = data => {
+      assert.equal(data, "update")
+      user.get("two").off(callback2)
+      if (done1) done()
+      else done2 = true
+    }
+    user.get("two").on(callback2)
+
+    user.get("two").put("value", err => {
+      assert.equal(err, null)
+      user.get("two").put("update", err => {
         assert.equal(err, null)
       })
     })
@@ -92,12 +120,9 @@ describe("holster.user.on", () => {
   test("on for properties in for loop", (t, done) => {
     ;(async () => {
       for (let i = 0; i < 5; i++) {
-        // Need to be careful putting user properties in a loop as they are
-        // verified per node, so wait for each update to return.
-        const err = await new Promise(res => {
-          user.get("for" + i).put(i, res)
+        user.get("for" + i).put(i, err => {
+          assert.equal(err, null)
         })
-        assert.equal(err, null)
       }
     })()
 
@@ -116,11 +141,9 @@ describe("holster.user.on", () => {
 
       setTimeout(async () => {
         for (let i = 0; i < 5; i++) {
-          // Same as above put, wait for each update to return.
-          const err = await new Promise(res => {
-            user.get("for" + i).put("update" + i, res)
+          user.get("for" + i).put("update" + i, err => {
+            assert.equal(err, null)
           })
-          assert.equal(err, null)
         }
         setTimeout(() => {
           if (count === 5) done()

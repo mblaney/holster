@@ -88,12 +88,9 @@ describe("holster.user.put", () => {
   test("put and get values in for loop", (t, done) => {
     ;(async () => {
       for (let i = 0; i < 5; i++) {
-        // Need to be careful putting user properties in a loop as they are
-        // verified per node, so wait for each update to return.
-        const err = await new Promise(res => {
-          user.get("for" + i).put(i, res)
+        user.get("for" + i).put(i, err => {
+          assert.equal(err, null)
         })
-        assert.equal(err, null)
       }
     })()
 

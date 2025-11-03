@@ -224,12 +224,17 @@ const Store = opt => {
       var soul = lex["#"]
       var key = typeof lex["."] === "string" ? lex["."] : ""
       var node
+      var signatures = {}
       const each = (value, key) => {
         if (!utils.match(lex["."], key)) return
 
         if (!node) node = {_: {"#": soul, ">": {}}}
         node[key] = value[0]
         node._[">"][key] = value[1]
+        // If signature is present, store it in _["s"]
+        if (value.length === 3 && value[2]) {
+          signatures[key] = value[2]
+        }
       }
 
       radisk(soul + enq + key, (err, value) => {
@@ -241,6 +246,10 @@ const Store = opt => {
         } else if (value) {
           each(value, key)
           graph = {[soul]: node}
+        }
+        // Only add _["s"] if we found any signatures
+        if (graph && graph[soul] && Object.keys(signatures).length > 0) {
+          graph[soul]._["s"] = signatures
         }
         cb(err, graph)
       })
@@ -277,7 +286,10 @@ const Store = opt => {
           count++
           let value = node[key]
           let state = node._[">"][key]
-          radisk(soul + enq + key, [value, state], ack)
+          let sig = node._["s"] && node._["s"][key]
+          // Only pass signature if it exists, otherwise just [value, state]
+          let data = sig ? [value, state, sig] : [value, state]
+          radisk(soul + enq + key, data, ack)
         })
       })
     },
