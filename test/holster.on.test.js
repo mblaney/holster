@@ -16,16 +16,45 @@ describe("holster.on", () => {
   })
 
   test("on for property on root then update - event", (t, done) => {
-    // The property needs to exist before it can be listend to for updates.
+    // Listener doesn't get called for initial put.
+    holster.get("key").on(data => {
+      assert.equal(data, "update")
+      done()
+    })
+
     holster.get("key").put("value", err => {
       assert.equal(err, null)
 
-      holster.get("key").on(data => {
-        assert.equal(data, "update")
-        done()
-      })
-
       holster.get("key").put("update", err => {
+        assert.equal(err, null)
+      })
+    })
+  })
+
+  test("on for property then update - two listeners", (t, done) => {
+    let done1 = false
+    let done2 = false
+
+    const callback1 = data => {
+      assert.equal(data, "update")
+      holster.get("two").off(callback1)
+      if (done2) done()
+      else done1 = true
+    }
+    holster.get("two").on(callback1)
+
+    const callback2 = data => {
+      assert.equal(data, "update")
+      holster.get("two").off(callback2)
+      if (done1) done()
+      else done2 = true
+    }
+    holster.get("two").on(callback2)
+
+    holster.get("two").put("value", err => {
+      assert.equal(err, null)
+
+      holster.get("two").put("update", err => {
         assert.equal(err, null)
       })
     })

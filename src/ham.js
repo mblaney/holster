@@ -43,6 +43,7 @@ Ham.mix = async (change, graph, secure, listen) => {
   const machine = Date.now()
   const now = {}
   const defer = {}
+  const validProperties = new Map() // Track valid properties per soul
   let wait = 0
 
   for (const soul of Object.keys(change)) {
@@ -54,10 +55,9 @@ Ham.mix = async (change, graph, secure, listen) => {
 
     if (!node || !node._) continue
 
-    const sig = node[utils.userSignature]
     const pub = node[utils.userPublicKey]
-    // If a signature and public key are provided then always verify.
-    if (sig && pub) verify = true
+    // If per-property signatures and public key are provided then always verify.
+    if (node._["s"] && pub) verify = true
 
     // Special case if soul starts with "~". Node must be system data ie,
     // ~@alias or ~publickey. For aliases, key and value must be a self
@@ -77,16 +77,34 @@ Ham.mix = async (change, graph, secure, listen) => {
       }
     }
     if (verify) {
-      // Partial nodes can be read from disk, which are ignored. This could be
-      // a missing signature or public key, or missing properties on the node
-      // which means verify won't work either.
-      if (!sig || !pub || !(await SEA.verify({m: node, s: sig}, {pub: pub}))) {
+      // Per-property signatures stored in node._["s"]
+      if (!pub || !node._) {
         continue
       }
+
+      // Verify properties individually, returns array of valid property names
+      const validProps = await SEA.verifyProperties(node, pub)
+
+      // If no properties verified, skip this update
+      if (validProps.length === 0) {
+        continue
+      }
+
+      // Track valid properties for this soul
+      validProperties.set(soul, new Set(validProps))
     }
 
     for (const key of Object.keys(node)) {
       if (key === "_") continue
+
+      // Skip metadata fields (including userSignature for old data)
+      if (key === utils.userSignature || key === utils.userPublicKey) continue
+
+      // If this soul had verification, only process properties that have valid signatures
+      // Properties without signatures in this update are left unchanged
+      if (validProperties.has(soul) && !validProperties.get(soul).has(key)) {
+        continue
+      }
 
       const value = node[key]
       const state = node._ && node._[">"] ? node._[">"][key] : 0
@@ -107,21 +125,27 @@ Ham.mix = async (change, graph, secure, listen) => {
         // Wait the shortest difference before trying the updates again.
         if (wait === 0 || skew < wait) wait = nodeWait = skew
         if (!defer[soul]) {
-          defer[soul] = {_: {"#": soul, ">": {}}}
+          defer[soul] = {_: {"#": soul, ">": {}, s: {}}}
         }
         defer[soul][key] = value
         defer[soul]._[">"][key] = state
+        if (node._["s"] && node._["s"][key]) {
+          defer[soul]._["s"][key] = node._["s"][key]
+        }
       } else {
         const result = Ham(state, currentState, value, currentValue)
         if (result.incoming) {
           if (!now[soul]) {
-            now[soul] = {_: {"#": soul, ">": {}}}
+            now[soul] = {_: {"#": soul, ">": {}, s: {}}}
           }
           if (!graph[soul]) {
-            graph[soul] = {_: {"#": soul, ">": {}}}
+            graph[soul] = {_: {"#": soul, ">": {}, s: {}}}
           }
           graph[soul][key] = now[soul][key] = value
           graph[soul]._[">"][key] = now[soul]._[">"][key] = state
+          if (node._["s"] && node._["s"][key]) {
+            graph[soul]._["s"][key] = now[soul]._["s"][key] = node._["s"][key]
+          }
           // Call event listeners for update on key, mix is called before
           // put has finished so wait for what could be multiple nested
           // updates on a node.

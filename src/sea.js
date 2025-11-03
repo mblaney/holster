@@ -118,7 +118,7 @@ const SEA = {
       // Allow data to be passed in with graph meta data,
       // (which should not be part of signature, so not verified).
       for (const k of Object.keys(signed.m).sort()) {
-        if (k !== "_" && k != userPublicKey && k != userSignature) {
+        if (k !== "_" && k !== userPublicKey && k !== userSignature) {
           msg[k] = signed.m[k]
         }
       }
@@ -135,6 +135,59 @@ const SEA = {
     if (cb) cb(null)
     return null
   },
+  // Verify individual property signatures stored in node._["s"]
+  // Returns array of valid property names
+  verifyProperties: async (node, pub, cb) => {
+    if (!pub || !node) {
+      if (cb) cb([])
+      return []
+    }
+
+    const key = await utils.subtle.importKey(
+      "jwk",
+      utils.jwk(pub),
+      {name: "ECDSA", namedCurve: "P-256"},
+      false,
+      ["verify"],
+    )
+
+    const alg = {name: "ECDSA", hash: {name: "SHA-256"}}
+    const valid = []
+    const propertySignatures = (node._ && node._["s"]) || {}
+
+    // Verify each property individually
+    for (const k of Object.keys(node).sort()) {
+      if (k === "_" || k == userPublicKey) continue
+
+      const propSig = propertySignatures[k]
+      if (!propSig) {
+        console.log(`warning: property '${k}' missing signature`)
+        continue
+      }
+
+      try {
+        const hash = await utils.sha256(node[k])
+        const sig = new Uint8Array(SafeBuffer.from(propSig, "base64"))
+
+        const isValid = await utils.subtle.verify(
+          alg,
+          key,
+          sig,
+          new Uint8Array(hash),
+        )
+        if (isValid) {
+          valid.push(k)
+        } else {
+          console.log(`warning: property '${k}' signature verification failed`)
+        }
+      } catch (err) {
+        console.log(`warning: property '${k}' error verifying: ${err.message}`)
+      }
+    }
+
+    if (cb) cb(valid)
+    return valid
+  },
   sign: async (data, pair, cb) => {
     if (!pair || !pair.pub || !pair.priv) {
       if (cb) cb(null)
@@ -147,7 +200,7 @@ const SEA = {
     } else {
       const check = utils.parse(data)
       for (const k of Object.keys(check).sort()) {
-        if (k !== "_" && k != userPublicKey && k != userSignature) {
+        if (k !== "_" && k !== userPublicKey && k !== userSignature) {
           msg[k] = check[k]
         }
       }
@@ -171,6 +224,37 @@ const SEA = {
 
     if (cb) cb(signed)
     return signed
+  },
+  // Sign individual properties for per-property verification
+  signProperties: async (data, pair, cb) => {
+    if (!pair || !pair.pub || !pair.priv) {
+      if (cb) cb(null)
+      return null
+    }
+
+    const check = utils.parse(data)
+    const propertySignatures = {}
+    const jwk = utils.jwk(pair.pub, pair.priv)
+    const alg = {name: "ECDSA", namedCurve: "P-256"}
+    const key = await utils.subtle.importKey("jwk", jwk, alg, false, ["sign"])
+
+    // Sign each property individually
+    for (const k of Object.keys(check).sort()) {
+      if (k !== "_" && k != userPublicKey && k != userSignature) {
+        const hash = await utils.sha256(check[k])
+        const sig = await utils.subtle.sign(
+          {name: "ECDSA", hash: {name: "SHA-256"}},
+          key,
+          new Uint8Array(hash),
+        )
+        propertySignatures[k] = SafeBuffer.from(sig, "binary").toString(
+          "base64",
+        )
+      }
+    }
+
+    if (cb) cb(propertySignatures)
+    return propertySignatures
   },
   work: async (data, salt, cb) => {
     if (typeof salt === "function") {

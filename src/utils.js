@@ -90,13 +90,13 @@ export const graph = (soul, data, sig, pub) => {
       g[soul]._[">"][key] = timestamp
     }
   }
-  // If a signature and public key are provided they also need to be stored on
-  // the node to ensure that future updates are only possible with the same
-  // public key. The signature is requried because later get requests will
-  // broadcast the data as a put, which other devices will need to verify.
+  // Store per-property signatures in node._["s"]
+  // sig is an object with per-property signatures
   if (sig && pub) {
-    g[soul][userSignature] = sig
-    g[soul]._[">"][userSignature] = timestamp
+    g[soul]._["s"] = {}
+    for (const [key, signature] of Object.entries(sig)) {
+      g[soul]._["s"][key] = signature
+    }
     g[soul][userPublicKey] = pub
     g[soul]._[">"][userPublicKey] = timestamp
   }

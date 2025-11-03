@@ -461,10 +461,14 @@ const Radisk = opt => {
 
 Radisk.encode = data => {
   // A key should be passed in as a string to encode, a value can optionally be
-  // an array of 2 items to include the value's state, as is done by store.js.
+  // an array of 2-3 items: [value, state] or [value, state, signature].
   let state = ""
-  if (data instanceof Array && data.length === 2) {
+  let sig = ""
+  if (data instanceof Array && (data.length === 2 || data.length === 3)) {
     state = etx + data[1]
+    if (data.length === 3 && data[2]) {
+      sig = etx + data[2]
+    }
     data = data[0]
   }
 
@@ -475,19 +479,19 @@ Radisk.encode = data => {
     while ((current = data[i++])) {
       if (current === unit) text += unit
     }
-    return text + '"' + data + state + unit
+    return text + '"' + data + state + sig + unit
   }
 
   const rel = utils.rel.is(data)
-  if (rel) return unit + "#" + rel + state + unit
+  if (rel) return unit + "#" + rel + state + sig + unit
 
-  if (utils.num.is(data)) return unit + "+" + (data || 0) + state + unit
+  if (utils.num.is(data)) return unit + "+" + (data || 0) + state + sig + unit
 
-  if (data === true) return unit + "+" + state + unit
+  if (data === true) return unit + "+" + state + sig + unit
 
-  if (data === false) return unit + "-" + state + unit
+  if (data === false) return unit + "-" + state + sig + unit
 
-  if (data === null) return unit + " " + state + unit
+  if (data === null) return unit + " " + state + sig + unit
 }
 
 Radisk.decode = (data, obj) => {
@@ -522,7 +526,11 @@ Radisk.decode = (data, obj) => {
 
   if (obj) obj.i = i + 1
 
-  let [value, state] = text.split(etx)
+  let parts = text.split(etx)
+  let value = parts[0]
+  let state = parts[1]
+  let sig = parts[2]
+
   if (!state) {
     if (previous === '"') return text
 
@@ -539,20 +547,36 @@ Radisk.decode = (data, obj) => {
     if (previous === " ") return null
   } else {
     state = parseFloat(state)
-    // If state was found then return an array.
-    if (previous === '"') return [value, state]
+    // If state was found then return an array with [value, state] or [value, state, sig]
+    if (sig) {
+      if (previous === '"') return [value, state, sig]
 
-    if (previous === "#") return [utils.rel.ify(value), state]
+      if (previous === "#") return [utils.rel.ify(value), state, sig]
 
-    if (previous === "+") {
-      if (value.length === 0) return [true, state]
+      if (previous === "+") {
+        if (value.length === 0) return [true, state, sig]
 
-      return [parseFloat(value), state]
+        return [parseFloat(value), state, sig]
+      }
+
+      if (previous === "-") return [false, state, sig]
+
+      if (previous === " ") return [null, state, sig]
+    } else {
+      if (previous === '"') return [value, state]
+
+      if (previous === "#") return [utils.rel.ify(value), state]
+
+      if (previous === "+") {
+        if (value.length === 0) return [true, state]
+
+        return [parseFloat(value), state]
+      }
+
+      if (previous === "-") return [false, state]
+
+      if (previous === " ") return [null, state]
     }
-
-    if (previous === "-") return [false, state]
-
-    if (previous === " ") return [null, state]
   }
 }
 
