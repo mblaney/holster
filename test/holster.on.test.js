@@ -17,10 +17,12 @@ describe("holster.on", () => {
 
   test("on for property on root then update - event", (t, done) => {
     // Listener doesn't get called for initial put.
-    holster.get("key").on(data => {
+    const callback = data => {
       assert.equal(data, "update")
+      holster.get("key").off(callback)
       done()
-    })
+    }
+    holster.get("key").on(callback)
 
     holster.get("key").put("value", err => {
       assert.equal(err, null)
