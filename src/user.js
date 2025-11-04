@@ -72,49 +72,36 @@ const User = (opt, wire) => {
             return
           }
 
-          // Migrate old per-node signatures to per-property signatures
-          // Check if data has per-property signatures
-          if (
-            !data._ ||
-            !data._["s"] ||
-            Object.keys(data._["s"]).length === 0
-          ) {
-            // Data has old per-node signatures, migrate to per-property
-            // Copy all properties from existing data, excluding metadata
-            const migrationData = {}
-            for (const key of Object.keys(data)) {
-              if (
-                key !== "_" &&
-                key !== userPublicKey &&
-                key !== userSignature
-              ) {
-                migrationData[key] = data[key]
-              }
+          // TODO: Remove this migration once all peers have updated to the new
+          // version and have received per-property signatures. This temporarily
+          // broadcasts signed data on every login to ensure new peers can
+          // persist it.
+          const migrationData = {}
+          for (const key of Object.keys(data)) {
+            if (key !== "_" && key !== userPublicKey && key !== userSignature) {
+              migrationData[key] = data[key]
             }
-            // Sign each property individually
-            const propertySignatures = await SEA.signProperties(
-              migrationData,
-              user.is,
-            )
-            const graph = utils.graph(
-              pub,
-              migrationData,
-              propertySignatures,
-              data.pub,
-            )
-            wire.put(graph, err => {
-              if (err) {
-                // Log migration error but don't fail authentication
-                console.log(
-                  `warning: failed to migrate signatures on login: ${err}`,
-                )
-              }
-              done(null)
-            })
-            return
           }
-
-          return done(null)
+          // Sign each property individually
+          const propertySignatures = await SEA.signProperties(
+            migrationData,
+            user.is,
+          )
+          const graph = utils.graph(
+            pub,
+            migrationData,
+            propertySignatures,
+            data.pub,
+          )
+          wire.put(graph, err => {
+            if (err) {
+              // Log migration error but don't fail authentication
+              console.log(
+                `warning: failed to migrate signatures on login: ${err}`,
+              )
+            }
+            done(null)
+          })
         },
         {wait: 5000},
       )
