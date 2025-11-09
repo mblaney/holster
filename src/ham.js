@@ -7,12 +7,20 @@ const MAX_GRAPH_SIZE = 10000
 
 // state and value are the incoming changes.
 // currentState and currentValue are the current graph data.
-const Ham = (state, currentState, value, currentValue) => {
+const Ham = (state, currentState, value, currentValue, signed = false) => {
   if (state < currentState) return {historical: true}
 
   if (state > currentState) return {incoming: true}
 
-  // state is equal to currentState, lexically compare to resolve conflict.
+  // state is equal to currentState
+  // If using signed timestamps then reject conflicting values because the
+  // owner can only create one value per timestamp.
+  if (signed && value !== currentValue) {
+    console.log(`Signed timestamp ${state}: reject conflicting value`)
+    return {historical: true}
+  }
+
+  // Lexically compare to resolve conflict (for unsigned or matching values)
   if (typeof value !== "string") {
     value = JSON.stringify(value) || ""
   }
@@ -44,6 +52,7 @@ Ham.mix = async (change, graph, secure, listen) => {
   const now = {}
   const defer = {}
   const validProperties = new Map() // Track valid properties per soul
+  const validTimestamps = new Map() // Track valid timestamps per soul
   let wait = 0
 
   for (const soul of Object.keys(change)) {
@@ -56,7 +65,7 @@ Ham.mix = async (change, graph, secure, listen) => {
     if (!node || !node._) continue
 
     const pub = node[utils.userPublicKey]
-    // If per-property signatures and public key are provided then always verify.
+    // If timestamp signatures and public key are provided then always verify
     if (node._["s"] && pub) verify = true
 
     // Special case if soul starts with "~". Node must be system data ie,
@@ -77,21 +86,39 @@ Ham.mix = async (change, graph, secure, listen) => {
       }
     }
     if (verify) {
-      // Per-property signatures stored in node._["s"]
+      // Signature verification: check node._["s"] which can contain:
+      // 1. Per-property signatures (legacy): keys are property names
+      // 2. Timestamp signatures (new): keys are numeric timestamps
       if (!pub || !node._) {
         continue
       }
 
-      // Verify properties individually, returns array of valid property names
-      const validProps = await SEA.verifyProperties(node, pub)
+      const signedTimestamps = new Set()
+      const signedProperties = new Set()
+      for (const [key, sig] of Object.entries(node._["s"] || {})) {
+        const asNumber = Number(key)
+        if (!isNaN(asNumber) && asNumber > 0) {
+          const isValid = await SEA.verifyTimestamp(asNumber, sig, pub)
+          if (isValid) {
+            signedTimestamps.add(asNumber)
+            // Add all properties with this timestamp to signed set
+            for (const [prop, ts] of Object.entries(node._[">"] || {})) {
+              if (ts === asNumber) {
+                signedProperties.add(prop)
+              }
+            }
+          }
+        }
+      }
 
       // If no properties verified, skip this update
-      if (validProps.length === 0) {
+      if (signedProperties.size === 0) {
         continue
       }
 
-      // Track valid properties for this soul
-      validProperties.set(soul, new Set(validProps))
+      // Track signed properties and timestamps for this soul
+      validProperties.set(soul, signedProperties)
+      validTimestamps.set(soul, signedTimestamps)
     }
 
     for (const key of Object.keys(node)) {
@@ -100,7 +127,6 @@ Ham.mix = async (change, graph, secure, listen) => {
       // Skip metadata fields (including userSignature for old data)
       if (key === utils.userSignature || key === utils.userPublicKey) continue
 
-      // If this soul had verification, only process properties that have valid signatures
       // Properties without signatures in this update are left unchanged
       if (validProperties.has(soul) && !validProperties.get(soul).has(key)) {
         continue
@@ -129,11 +155,18 @@ Ham.mix = async (change, graph, secure, listen) => {
         }
         defer[soul][key] = value
         defer[soul]._[">"][key] = state
-        if (node._["s"] && node._["s"][key]) {
-          defer[soul]._["s"][key] = node._["s"][key]
+        if (node._["s"]) {
+          if (node._["s"][state]) {
+            defer[soul]._["s"][state] = node._["s"][state]
+          } else if (node._["s"][key]) {
+            defer[soul]._["s"][key] = node._["s"][key]
+          }
         }
       } else {
-        const result = Ham(state, currentState, value, currentValue)
+        // Check if this property has a signed timestamp
+        const isSigned =
+          validTimestamps.has(soul) && validTimestamps.get(soul).has(state)
+        const result = Ham(state, currentState, value, currentValue, isSigned)
         if (result.incoming) {
           if (!now[soul]) {
             now[soul] = {_: {"#": soul, ">": {}, s: {}}}
@@ -143,8 +176,13 @@ Ham.mix = async (change, graph, secure, listen) => {
           }
           graph[soul][key] = now[soul][key] = value
           graph[soul]._[">"][key] = now[soul]._[">"][key] = state
-          if (node._["s"] && node._["s"][key]) {
-            graph[soul]._["s"][key] = now[soul]._["s"][key] = node._["s"][key]
+          if (node._["s"]) {
+            if (node._["s"][state]) {
+              graph[soul]._["s"][state] = now[soul]._["s"][state] =
+                node._["s"][state]
+            } else if (node._["s"][key]) {
+              graph[soul]._["s"][key] = now[soul]._["s"][key] = node._["s"][key]
+            }
           }
           // Call event listeners for update on key, mix is called before
           // put has finished so wait for what could be multiple nested
@@ -163,11 +201,6 @@ Ham.mix = async (change, graph, secure, listen) => {
       }
     }
 
-    if (verify && nodeWait !== 0 && now[soul]) {
-      // Secure updates can't be split, so move now to deferred as well.
-      Object.assign(defer[soul], now[soul])
-      delete now[soul]
-    }
     // Call event listeners for update on soul.
     if (updated && listen[soul]) {
       setTimeout(() => {

@@ -80,22 +80,29 @@ export const userPublicKey = "_holster_user_public_key"
 
 // graph converts objects to graph format with updated states,
 // with optional meta data to verify signed data.
-export const graph = (soul, data, sig, pub) => {
-  const timestamp = Date.now()
+export const graph = (soul, data, sig, pub, timestamp) => {
   const g = {[soul]: {_: {"#": soul, ">": {}}}}
 
   for (const [key, value] of Object.entries(data)) {
     if (key !== "_" && key !== userPublicKey && key !== userSignature) {
       g[soul][key] = value
-      g[soul]._[">"][key] = timestamp
+      g[soul]._[">"][key] = timestamp || Date.now()
     }
   }
-  // Store per-property signatures in node._["s"]
-  // sig is an object with per-property signatures
-  if (sig && pub) {
+  // Store signatures in node._["s"]
+  // sig can be:
+  // - object: per-property signatures (legacy format)
+  // - string: timestamp signature (new format)
+  if (sig && pub && timestamp) {
     g[soul]._["s"] = {}
-    for (const [key, signature] of Object.entries(sig)) {
-      g[soul]._["s"][key] = signature
+    if (typeof sig === "string") {
+      // Timestamp signature: store with timestamp as key
+      g[soul]._["s"][timestamp] = sig
+    } else if (typeof sig === "object") {
+      // Per-property signatures: store with property names as keys
+      for (const [key, signature] of Object.entries(sig)) {
+        g[soul]._["s"][key] = signature
+      }
     }
     g[soul][userPublicKey] = pub
     g[soul]._[">"][userPublicKey] = timestamp

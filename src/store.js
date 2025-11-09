@@ -233,6 +233,11 @@ const Store = opt => {
         node._[">"][key] = value[1]
         // If signature is present, store it in _["s"]
         if (value.length === 3 && value[2]) {
+          const state = value[1]
+          // Store signature under both state and key for compatibility
+          signatures[state] = value[2]
+          // TODO: Can probably remove the following when old data is no
+          // longer a problem.
           signatures[key] = value[2]
         }
       }
@@ -286,8 +291,7 @@ const Store = opt => {
           count++
           let value = node[key]
           let state = node._[">"][key]
-          let sig = node._["s"] && node._["s"][key]
-          // Only pass signature if it exists, otherwise just [value, state]
+          let sig = node._["s"] && node._["s"][state]
           let data = sig ? [value, state, sig] : [value, state]
           radisk(soul + enq + key, data, ack)
         })

@@ -24,16 +24,26 @@ const Get = (lex, graph) => {
 
     node[key] = graph[soul][key]
     node._[">"][key] = graph[soul]._[">"][key]
-    if (graph[soul]._["s"] && graph[soul]._["s"][key]) {
-      signatures[key] = graph[soul]._["s"][key]
+    const state = graph[soul]._[">"][key]
+    if (graph[soul]._["s"]) {
+      if (graph[soul]._["s"][state]) {
+        signatures[state] = graph[soul]._["s"][state]
+      } else if (graph[soul]._["s"][key]) {
+        signatures[key] = graph[soul]._["s"][key]
+      }
     }
   } else {
     for (const key of Object.keys(graph[soul])) {
       if (match(lex["."], key)) {
         node[key] = graph[soul][key]
         node._[">"][key] = graph[soul]._[">"][key]
-        if (graph[soul]._["s"] && graph[soul]._["s"][key]) {
-          signatures[key] = graph[soul]._["s"][key]
+        const state = graph[soul]._[">"][key]
+        if (graph[soul]._["s"]) {
+          if (graph[soul]._["s"][state]) {
+            signatures[state] = graph[soul]._["s"][state]
+          } else if (graph[soul]._["s"][key]) {
+            signatures[key] = graph[soul]._["s"][key]
+          }
         }
       }
     }

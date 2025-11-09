@@ -60,8 +60,9 @@ const User = (opt, wire) => {
             const update = {
               auth: JSON.stringify({enc: enc, salt: salt}),
             }
-            const propertySignatures = await SEA.signProperties(update, user.is)
-            const graph = utils.graph(pub, update, propertySignatures, data.pub)
+            const timestamp = Date.now()
+            const sig = await SEA.signTimestamp(timestamp, user.is)
+            const graph = utils.graph(pub, update, sig, data.pub, timestamp)
             wire.put(graph, err => {
               if (err) {
                 done(`error putting ${update} on ${pub}: ${err}`)
@@ -72,36 +73,46 @@ const User = (opt, wire) => {
             return
           }
 
-          // TODO: Remove this migration once all peers have updated to the new
-          // version and have received per-property signatures. This temporarily
-          // broadcasts signed data on every login to ensure new peers can
-          // persist it.
-          const migrationData = {}
-          for (const key of Object.keys(data)) {
-            if (key !== "_" && key !== userPublicKey && key !== userSignature) {
-              migrationData[key] = data[key]
+          // Migration: broadcast signed data on login if enabled
+          // Can be enabled by setting localStorage.setItem("holster_migrate_signatures", "true")
+          const migrationEnabled =
+            typeof globalThis.localStorage !== "undefined" &&
+            globalThis.localStorage.getItem("holster_migrate_signatures") ===
+              "true"
+
+          if (migrationEnabled) {
+            const migrationData = {}
+            for (const key of Object.keys(data)) {
+              if (
+                key !== "_" &&
+                key !== userPublicKey &&
+                key !== userSignature
+              ) {
+                migrationData[key] = data[key]
+              }
             }
-          }
-          // Sign each property individually
-          const propertySignatures = await SEA.signProperties(
-            migrationData,
-            user.is,
-          )
-          const graph = utils.graph(
-            pub,
-            migrationData,
-            propertySignatures,
-            data.pub,
-          )
-          wire.put(graph, err => {
-            if (err) {
-              // Log migration error but don't fail authentication
-              console.log(
-                `warning: failed to migrate signatures on login: ${err}`,
-              )
-            }
+            // Sign the timestamp for migration
+            const timestamp = Date.now()
+            const sig = await SEA.signTimestamp(timestamp, user.is)
+            const graph = utils.graph(
+              pub,
+              migrationData,
+              sig,
+              data.pub,
+              timestamp,
+            )
+            wire.put(graph, err => {
+              if (err) {
+                // Log migration error but don't fail authentication
+                console.log(
+                  `warning: failed to migrate signatures on login: ${err}`,
+                )
+              }
+              done(null)
+            })
+          } else {
             done(null)
-          })
+          }
         },
         {wait: 5000},
       )
@@ -187,9 +198,10 @@ const User = (opt, wire) => {
           }
 
           const pub = "~" + pair.pub
-          // Sign each property individually for new account
-          const propertySignatures = await SEA.signProperties(data, pair)
-          const graph = utils.graph(pub, data, propertySignatures, pair.pub)
+          // Sign the timestamp for new account
+          const timestamp = Date.now()
+          const sig = await SEA.signTimestamp(timestamp, pair)
+          const graph = utils.graph(pub, data, sig, pair.pub, timestamp)
           wire.put(graph, err => {
             creating = false
             if (err) {
@@ -346,10 +358,11 @@ const User = (opt, wire) => {
         }
 
         const data = {username: null, pub: null, epub: null, auth: null}
-        // Sign each property individually for account deletion
-        const propertySignatures = await SEA.signProperties(data, user.is)
+        // Sign the timestamp for account deletion
+        const timestamp = Date.now()
+        const sig = await SEA.signTimestamp(timestamp, user.is)
         const pub = "~" + user.is.pub
-        const graph = utils.graph(pub, data, propertySignatures, user.is.pub)
+        const graph = utils.graph(pub, data, sig, user.is.pub, timestamp)
         wire.put(graph, err => {
           if (err) {
             ack(`error putting null on ${pub}: ${err}`)
