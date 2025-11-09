@@ -354,6 +354,9 @@ const Wire = opt => {
   const api = send => {
     return {
       get: (lex, cb, _opt) => {
+        if (lex && typeof lex["."] === "number") {
+          lex = {...lex, ".": String(lex["."])}
+        }
         // Mark requested soul as something we want to store
         if (lex && lex["#"]) {
           pendingReferences.add(lex["#"])
@@ -403,6 +406,9 @@ const Wire = opt => {
         }
       },
       on: (lex, cb, _get, _opt) => {
+        if (lex && typeof lex["."] === "number") {
+          lex = {...lex, ".": String(lex["."])}
+        }
         const soul = lex && lex["#"]
         if (!soul || !cb) return
 

@@ -1,6 +1,6 @@
 {
   "name": "@mblaney/holster",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "description": "Holster is a service that allows synchronising data between devices using Node, Deno, Bun or the browser.",
   "type": "module",
   "main": "index.js",
