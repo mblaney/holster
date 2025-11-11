@@ -226,7 +226,8 @@ const Store = opt => {
       var node
       var signatures = {}
       const each = (value, key) => {
-        if (!utils.match(lex["."], key)) return
+        // Always include userPublicKey for verification, regardless of filter
+        if (key !== utils.userPublicKey && !utils.match(lex["."], key)) return
 
         if (!node) node = {_: {"#": soul, ">": {}}}
         node[key] = value[0]

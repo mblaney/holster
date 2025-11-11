@@ -1,4 +1,4 @@
-import {match} from "./utils.js"
+import {match, userPublicKey} from "./utils.js"
 
 const Get = (lex, graph) => {
   if (!lex || typeof lex !== "object") {
@@ -34,7 +34,8 @@ const Get = (lex, graph) => {
     }
   } else {
     for (const key of Object.keys(graph[soul])) {
-      if (match(lex["."], key)) {
+      // Always include userPublicKey for verification, regardless of filter
+      if (key === userPublicKey || match(lex["."], key)) {
         node[key] = graph[soul][key]
         node._[">"][key] = graph[soul]._[">"][key]
         const state = graph[soul]._[">"][key]
