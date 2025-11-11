@@ -197,46 +197,6 @@ const Wire = opt => {
   const rateLimiter = createRateLimiter(isTestEnv)
   const connectionManager = createConnectionManager(opt.maxConnections || 1000)
 
-  // The check function is required because user data must provide a public key
-  // so that it can be verified. The public key might verify the provided
-  // signature but not actually match the user under which the data is being
-  // stored. To avoid this, the current data on a soul needs to be checked to
-  // make sure the stored public key matches the one provided with the update.
-  const check = async (data, send, cb) => {
-    for (const soul of Object.keys(data)) {
-      const msg = await new Promise(res => {
-        getWithCallback({"#": soul}, res, send)
-      })
-      if (msg.err) {
-        if (cb) cb(msg.err)
-        return false
-      }
-
-      const node = data[soul]
-      const key = utils.userPublicKey
-      // If there is no current node then the data is ok to write without
-      // matching public keys, as the provided soul also needs a rel on the
-      // parent node which then also requires checking. Otherwise publc keys
-      // need to match for existing data.
-      if (!msg.put || !msg.put[soul] || msg.put[soul][key] === node[key]) {
-        continue
-      }
-
-      // If a soul exists but does not have a public key, then one should not be
-      // added because the node is not user data. The above check fails in this
-      // case if a public key is provided. Note that this is only an error case
-      // if called via the API, which is when a callback is provided here.
-      // (The wire spec can fetch and put data on the wire without a signature
-      // or public key and this can be ignored.)
-      if (cb) {
-        cb(`error in wire check public key does not match for soul: ${soul}`)
-      }
-      return false
-    }
-
-    return true
-  }
-
   const get = (msg, send) => {
     const ack = Get(msg.get, graph)
     if (ack) {
@@ -248,16 +208,22 @@ const Wire = opt => {
         }),
       )
     } else {
-      store.get(msg.get, (err, ack) => {
-        send(
-          JSON.stringify({
-            "#": dup.track(utils.text.random(9)),
-            "@": msg["#"],
-            put: ack,
-            err: err,
-          }),
-        )
-      })
+      // Always pass secure to ensure public key is fetched. User data may be
+      // requested that requires the public key for verification.
+      store.get(
+        msg.get,
+        (err, ack) => {
+          send(
+            JSON.stringify({
+              "#": dup.track(utils.text.random(9)),
+              "@": msg["#"],
+              put: ack,
+              err: err,
+            }),
+          )
+        },
+        {secure: true},
+      )
     }
   }
 
@@ -274,8 +240,6 @@ const Wire = opt => {
       }
       return
     }
-
-    if (!(await check(update.now, send))) return
 
     store.put(update.now, err => {
       send(
@@ -377,8 +341,6 @@ const Wire = opt => {
           if (cb) cb(null)
           return
         }
-
-        if (!(await check(update.now, send, cb))) return
 
         // Seed pendingReferences with any new references from API calls
         for (const [soul, node] of Object.entries(update.now)) {

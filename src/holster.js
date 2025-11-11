@@ -522,8 +522,8 @@ const Holster = opt => {
               }
 
               // The nested objects created above will also have rels on the
-              // parent object, so fetch the node so that the rest of the updates
-              // can be added.
+              // parent object, so fetch the node so that the rest of the
+              // updates can be added.
               wire.get({"#": id}, async msg => {
                 if (msg.err) {
                   _ack(`error getting ${id}: ${msg.err}`)
