@@ -72,7 +72,8 @@ const Holster = opt => {
                 const attemptRead = async (retries = 0) => {
                   const data = await new Promise(res => {
                     const _ctxid = utils.text.random()
-                    allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
+                    const ctx = allctx.get(ctxid)
+                    allctx.set(_ctxid, {chain: [{item: null, soul: id}], user: ctx ? ctx.user : null})
                     api(_ctxid).next(null, res, _opt)
                   })
                   if (data !== null || retries >= 5) {
@@ -230,7 +231,7 @@ const Holster = opt => {
               if (cb) cb(null)
             }
           },
-          request._opt,
+          {...request._opt, secure: ctx.user || opt.secure},
         )
         // Callback has been passed to next soul lookup or called above, so
         // return false as the calling code should not continue.
@@ -441,7 +442,7 @@ const Holster = opt => {
 
               wire.put(g, _ack)
             })
-          })
+          }, {secure: ctx.user || opt.secure})
           return
         }
 
@@ -530,7 +531,7 @@ const Holster = opt => {
 
               wire.put(g, _ack)
             })
-          })
+          }, {secure: ctx.user || opt.secure})
         }
         attemptRead()
       },
@@ -556,8 +557,11 @@ const Holster = opt => {
         const {item, soul} = resolve({on: lex, _get: _get, _opt: _opt}, cb)
         if (!soul) return
 
+        // Get the context to check if it has user info
+        const ctx = allctx.get(ctxid)
+
         // Flag that this context is set from on and shouldn't be removed.
-        allctx.set(ctxid, {chain: [{item: item, soul: soul}], on: true})
+        allctx.set(ctxid, {chain: [{item: item, soul: soul}], on: true, user: ctx ? ctx.user : null})
         // Map the user's callback because it can also be passed to off,
         // so need a reference to it to compare them.
         // Create a new context for each listener invocation to avoid mutation
@@ -574,7 +578,7 @@ const Holster = opt => {
                 const attemptRead = async (retries = 0) => {
                   const data = await new Promise(res => {
                     const _ctxid = utils.text.random()
-                    allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
+                    allctx.set(_ctxid, {chain: [{item: null, soul: id}], user: ctx ? ctx.user : null})
                     api(_ctxid).next(null, res, _opt)
                   })
                   if (data !== null || retries >= 5) {
@@ -591,7 +595,7 @@ const Holster = opt => {
                 cb(current !== undefined ? current : null)
               }
             },
-            _opt,
+            {..._opt, secure: ctx.user || opt.secure},
           )
         })
 
@@ -637,7 +641,7 @@ const Holster = opt => {
               map.get(cb)()
             }
           },
-          _opt,
+          {..._opt, secure: ctx.user || opt.secure},
         )
       },
       off: cb => {

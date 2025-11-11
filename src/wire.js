@@ -347,7 +347,7 @@ const Wire = opt => {
         pendingTimeouts.delete(track)
         return
       }
-    })
+    }, _opt)
   }
 
   const api = send => {
