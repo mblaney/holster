@@ -302,10 +302,9 @@ const Wire = opt => {
 
     const ack = Get(lex, graph)
     const track = utils.text.random(9)
-    // Request the whole node in secure mode for verification.
     const request = JSON.stringify({
       "#": dup.track(track),
-      get: opt.secure ? {"#": lex["#"]} : lex,
+      get: lex,
     })
 
     if (ack) {
