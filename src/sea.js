@@ -238,6 +238,59 @@ const SEA = {
       return false
     }
   },
+  // Verify individual property signatures stored in node._["s"]
+  // Returns array of valid property names
+  verifyProperties: async (node, pub, cb) => {
+    if (!pub || !node) {
+      if (cb) cb([])
+      return []
+    }
+
+    const key = await utils.subtle.importKey(
+      "jwk",
+      utils.jwk(pub),
+      {name: "ECDSA", namedCurve: "P-256"},
+      false,
+      ["verify"],
+    )
+
+    const alg = {name: "ECDSA", hash: {name: "SHA-256"}}
+    const valid = []
+    const propertySignatures = (node._ && node._["s"]) || {}
+
+    // Verify each property individually
+    for (const k of Object.keys(node).sort()) {
+      if (k === "_" || k == userPublicKey) continue
+
+      const propSig = propertySignatures[k]
+      if (!propSig) {
+        console.log(`warning: property '${k}' missing signature`)
+        continue
+      }
+
+      try {
+        const hash = await utils.sha256(node[k])
+        const sig = new Uint8Array(SafeBuffer.from(propSig, "base64"))
+
+        const isValid = await utils.subtle.verify(
+          alg,
+          key,
+          sig,
+          new Uint8Array(hash),
+        )
+        if (isValid) {
+          valid.push(k)
+        } else {
+          console.log(`warning: property '${k}' signature verification failed`)
+        }
+      } catch (err) {
+        console.log(`warning: property '${k}' error verifying: ${err.message}`)
+      }
+    }
+
+    if (cb) cb(valid)
+    return valid
+  },
   work: async (data, salt, cb) => {
     if (typeof salt === "function") {
       cb = salt

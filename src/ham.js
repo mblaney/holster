@@ -95,6 +95,8 @@ Ham.mix = async (change, graph, secure, listen) => {
 
       const signedTimestamps = new Set()
       const signedProperties = new Set()
+
+      // Verify timestamp signatures (numeric keys in node._["s"])
       for (const [key, sig] of Object.entries(node._["s"] || {})) {
         const asNumber = Number(key)
         if (!isNaN(asNumber) && asNumber > 0) {
@@ -103,13 +105,17 @@ Ham.mix = async (change, graph, secure, listen) => {
             signedTimestamps.add(asNumber)
             // Add all properties with this timestamp to signed set
             for (const [prop, ts] of Object.entries(node._[">"] || {})) {
-              if (ts === asNumber) {
+              if (Number(ts) === asNumber) {
                 signedProperties.add(prop)
               }
             }
           }
         }
       }
+
+      // Verify per-property signatures (backward compatibility)
+      const perPropertySignedProps = await SEA.verifyProperties(node, pub)
+      perPropertySignedProps.forEach(prop => signedProperties.add(prop))
 
       // If no properties verified, skip this update
       if (signedProperties.size === 0) {
