@@ -32,6 +32,20 @@ const Get = (lex, graph) => {
         signatures[key] = graph[soul]._["s"][key]
       }
     }
+
+    // Always include userPublicKey for verification, regardless of filter
+    if (userPublicKey && typeof graph[soul][userPublicKey] !== "undefined") {
+      node[userPublicKey] = graph[soul][userPublicKey]
+      node._[">"][userPublicKey] = graph[soul]._[">"][userPublicKey]
+      const pkState = graph[soul]._[">"][userPublicKey]
+      if (graph[soul]._["s"]) {
+        if (graph[soul]._["s"][pkState]) {
+          signatures[pkState] = graph[soul]._["s"][pkState]
+        } else if (graph[soul]._["s"][userPublicKey]) {
+          signatures[userPublicKey] = graph[soul]._["s"][userPublicKey]
+        }
+      }
+    }
   } else {
     for (const key of Object.keys(graph[soul])) {
       // Always include userPublicKey for verification, regardless of filter

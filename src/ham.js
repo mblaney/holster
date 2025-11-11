@@ -130,9 +130,6 @@ Ham.mix = async (change, graph, secure, listen) => {
     for (const key of Object.keys(node)) {
       if (key === "_") continue
 
-      // Skip metadata fields (including userSignature for old data)
-      if (key === utils.userSignature || key === utils.userPublicKey) continue
-
       // Properties without signatures in this update are left unchanged
       if (validProperties.has(soul) && !validProperties.get(soul).has(key)) {
         continue
