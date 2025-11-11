@@ -1,7 +1,6 @@
 import Radisk from "./radisk.js"
 import Radix from "./radix.js"
 import * as utils from "./utils.js"
-import {userPublicKey} from "./utils.js"
 
 const isNode = typeof document === "undefined"
 const fs = isNode ? await import(/*webpackIgnore: true*/ "node:fs") : undefined
@@ -228,7 +227,7 @@ const Store = opt => {
       var signatures = {}
       const each = (value, key) => {
         // Always include userPublicKey for verification, regardless of filter
-        if (key !== userPublicKey && !utils.match(lex["."], key)) return
+        if (key !== utils.userPublicKey && !utils.match(lex["."], key)) return
 
         if (!node) node = {_: {"#": soul, ">": {}}}
         node[key] = value[0]
