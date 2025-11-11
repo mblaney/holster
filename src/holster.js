@@ -67,7 +67,6 @@ const Holster = opt => {
             for (const key of Object.keys(msg.put[soul])) {
               const id = utils.rel.is(msg.put[soul][key])
               if (id) {
-                // Due to message queuing, the related node might not be available yet
                 // Retry with delays if we get null
                 const attemptRead = async (retries = 0) => {
                   const data = await new Promise(res => {
@@ -158,11 +157,7 @@ const Holster = opt => {
           {"#": soul, ".": item},
           async msg => {
             if (msg.err) {
-              if (ctx.user || opt.secure) {
-                console.log(`error getting ${soul}: ${msg.err}`)
-              } else {
-                console.log(`error getting ${item} on ${soul}: ${msg.err}`)
-              }
+              console.log(`error getting ${item} on ${soul}: ${msg.err}`)
               if (cb) cb(null)
               return
             }
@@ -513,8 +508,9 @@ const Holster = opt => {
               return
             }
 
-            // The nested objects created above will also have rels on the parent
-            // object, so fetch the node so the rest of the updates can be added.
+            // The nested objects created above will also have rels on the
+            // parent object, so fetch the node so that the rest of the updates
+            // can be added.
             wire.get({"#": id}, async msg => {
               if (msg.err) {
                 _ack(`error getting ${id}: ${msg.err}`)
