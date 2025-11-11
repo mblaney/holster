@@ -264,7 +264,6 @@ const SEA = {
 
       const propSig = propertySignatures[k]
       if (!propSig) {
-        console.log(`warning: property '${k}' missing signature`)
         continue
       }
 

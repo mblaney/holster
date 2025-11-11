@@ -67,12 +67,15 @@ const Holster = opt => {
             for (const key of Object.keys(msg.put[soul])) {
               const id = utils.rel.is(msg.put[soul][key])
               if (id) {
-                // Due to message queuing, the related node might not be available yet
                 // Retry with delays if we get null
                 const attemptRead = async (retries = 0) => {
                   const data = await new Promise(res => {
                     const _ctxid = utils.text.random()
-                    allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
+                    const ctx = allctx.get(ctxid)
+                    allctx.set(_ctxid, {
+                      chain: [{item: null, soul: id}],
+                      user: ctx ? ctx.user : null,
+                    })
                     api(_ctxid).next(null, res, _opt)
                   })
                   if (data !== null || retries >= 5) {
@@ -157,11 +160,7 @@ const Holster = opt => {
           {"#": soul, ".": item},
           async msg => {
             if (msg.err) {
-              if (ctx.user || opt.secure) {
-                console.log(`error getting ${soul}: ${msg.err}`)
-              } else {
-                console.log(`error getting ${item} on ${soul}: ${msg.err}`)
-              }
+              console.log(`error getting ${item} on ${soul}: ${msg.err}`)
               if (cb) cb(null)
               return
             }
@@ -230,7 +229,7 @@ const Holster = opt => {
               if (cb) cb(null)
             }
           },
-          request._opt,
+          {...request._opt, secure: ctx.user || opt.secure},
         )
         // Callback has been passed to next soul lookup or called above, so
         // return false as the calling code should not continue.
@@ -382,66 +381,70 @@ const Holster = opt => {
           // When result is true data is a property to put on the current soul.
           // Need to check if item is a rel and also set the node to null. (This
           // applies for any update from a rel to a property, not just null.)
-          wire.get({"#": soul, ".": item}, async msg => {
-            if (msg.err) {
-              _ack(`error getting ${soul}: ${msg.err}`)
-              return
-            }
-
-            let node = msg.put && msg.put[soul]
-            const current = node && node[item]
-            const id = utils.rel.is(current)
-            if (!id) {
-              // Not a rel, can just put the data.
-              if (!node) node = {}
-              node[item] = data
-              const g = await graph(soul, node, ctx.user, _ack)
-              if (g === null) return
-
-              wire.put(g, _ack)
-              return
-            }
-
-            wire.get({"#": id}, async msg => {
+          wire.get(
+            {"#": soul, ".": item},
+            async msg => {
               if (msg.err) {
-                _ack(`error getting ${id}: ${msg.err}`)
+                _ack(`error getting ${soul}: ${msg.err}`)
                 return
               }
 
-              if (!msg.put || !msg.put[id]) {
-                _ack(`error ${id} not found`)
+              let node = msg.put && msg.put[soul]
+              const current = node && node[item]
+              const id = utils.rel.is(current)
+              if (!id) {
+                // Not a rel, can just put the data.
+                if (!node) node = {}
+                node[item] = data
+                const g = await graph(soul, node, ctx.user, _ack)
+                if (g === null) return
+
+                wire.put(g, _ack)
                 return
               }
 
-              // null each of the properties on the node before putting data.
-              for (const key of Object.keys(msg.put[id])) {
-                if (
-                  key === "_" ||
-                  key === utils.userPublicKey ||
-                  key === utils.userSignature
-                ) {
-                  continue
-                }
-
-                const err = await new Promise(res => {
-                  const _ctxid = utils.text.random()
-                  const chain = [{item: key, soul: id}]
-                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
-                  api(_ctxid).put(null, res)
-                })
-                if (err) {
-                  _ack(err)
+              wire.get({"#": id}, async msg => {
+                if (msg.err) {
+                  _ack(`error getting ${id}: ${msg.err}`)
                   return
                 }
-              }
-              if (!node) node = {}
-              node[item] = data
-              const g = await graph(soul, node, ctx.user, _ack)
-              if (g === null) return
 
-              wire.put(g, _ack)
-            })
-          })
+                if (!msg.put || !msg.put[id]) {
+                  _ack(`error ${id} not found`)
+                  return
+                }
+
+                // null each of the properties on the node before putting data.
+                for (const key of Object.keys(msg.put[id])) {
+                  if (
+                    key === "_" ||
+                    key === utils.userPublicKey ||
+                    key === utils.userSignature
+                  ) {
+                    continue
+                  }
+
+                  const err = await new Promise(res => {
+                    const _ctxid = utils.text.random()
+                    const chain = [{item: key, soul: id}]
+                    allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                    api(_ctxid).put(null, res)
+                  })
+                  if (err) {
+                    _ack(err)
+                    return
+                  }
+                }
+                if (!node) node = {}
+                node[item] = data
+                const g = await graph(soul, node, ctx.user, _ack)
+                if (g === null) return
+
+                wire.put(g, _ack)
+              })
+            },
+            {secure: ctx.user || opt.secure},
+          )
           return
         }
 
@@ -449,88 +452,97 @@ const Holster = opt => {
         // Need to check if a rel has already been added on the current node.
         // Use attemptRead to retry if data hasn't propagated yet.
         const attemptRead = (retries = 0) => {
-          wire.get({"#": soul, ".": item}, async msg => {
-            if (msg.err) {
-              _ack(`error getting ${soul}.${item}: ${msg.err}`)
-              return
-            }
-
-            let node = msg.put && msg.put[soul]
-            const current = node && node[item]
-
-            // If we didn't find the item but still have retries, retry
-            if (!current && retries < 5) {
-              await new Promise(r => setTimeout(r, 50))
-              return attemptRead(retries + 1)
-            }
-
-            const id = utils.rel.is(current)
-            if (!id) {
-              // The current rel doesn't exist, so add it first.
-              if (!node) node = {}
-              node[item] = utils.rel.ify(utils.text.random())
-              const g = await graph(soul, node, ctx.user, _ack)
-              if (g === null) return
-
-              wire.put(g, err => {
-                if (err) {
-                  _ack(`error putting ${item} on ${soul}: ${err}`)
-                } else {
-                  const _ctxid = utils.text.random()
-                  const chain = [{item: item, soul: soul}]
-                  // Pass on the previous context's callback and user flag here.
-                  allctx.set(_ctxid, {chain: chain, user: ctx.user, cb: ctx.cb})
-                  api(_ctxid).put(data)
-                }
-              })
-              return
-            }
-
-            const update = []
-            for (const key of result) {
-              const err = await new Promise(res => {
-                if (utils.obj.is(data[key]) && !utils.rel.is(data[key])) {
-                  // Use the current rel as the context for nested objects.
-                  const _ctxid = utils.text.random()
-                  const chain = [{item: key, soul: id}]
-                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
-                  api(_ctxid).put(data[key], res)
-                } else {
-                  // Group the rest of the updates for put below.
-                  update.push(key)
-                  res(null)
-                }
-              })
-              if (err) {
-                _ack(err, ctxid)
-                return
-              }
-            }
-
-            if (update.length === 0) {
-              _ack(null)
-              return
-            }
-
-            // The nested objects created above will also have rels on the parent
-            // object, so fetch the node so the rest of the updates can be added.
-            wire.get({"#": id}, async msg => {
+          wire.get(
+            {"#": soul, ".": item},
+            async msg => {
               if (msg.err) {
-                _ack(`error getting ${id}: ${msg.err}`)
+                _ack(`error getting ${soul}.${item}: ${msg.err}`)
                 return
               }
 
-              let node = msg.put && msg.put[id]
-              if (!node) node = {}
-              update.forEach(key => {
-                node[key] = data[key]
-              })
-              const g = await graph(id, node, ctx.user, _ack)
-              if (g === null) return
+              let node = msg.put && msg.put[soul]
+              const current = node && node[item]
 
-              wire.put(g, _ack)
-            })
-          })
+              // If we didn't find the item but still have retries, retry
+              if (!current && retries < 5) {
+                await new Promise(r => setTimeout(r, 50))
+                return attemptRead(retries + 1)
+              }
+
+              const id = utils.rel.is(current)
+              if (!id) {
+                // The current rel doesn't exist, so add it first.
+                if (!node) node = {}
+                node[item] = utils.rel.ify(utils.text.random())
+                const g = await graph(soul, node, ctx.user, _ack)
+                if (g === null) return
+
+                wire.put(g, err => {
+                  if (err) {
+                    _ack(`error putting ${item} on ${soul}: ${err}`)
+                  } else {
+                    const _ctxid = utils.text.random()
+                    const chain = [{item: item, soul: soul}]
+                    // Pass on the previous context's callback and user flag here.
+                    allctx.set(_ctxid, {
+                      chain: chain,
+                      user: ctx.user,
+                      cb: ctx.cb,
+                    })
+                    api(_ctxid).put(data)
+                  }
+                })
+                return
+              }
+
+              const update = []
+              for (const key of result) {
+                const err = await new Promise(res => {
+                  if (utils.obj.is(data[key]) && !utils.rel.is(data[key])) {
+                    // Use the current rel as the context for nested objects.
+                    const _ctxid = utils.text.random()
+                    const chain = [{item: key, soul: id}]
+                    allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                    api(_ctxid).put(data[key], res)
+                  } else {
+                    // Group the rest of the updates for put below.
+                    update.push(key)
+                    res(null)
+                  }
+                })
+                if (err) {
+                  _ack(err, ctxid)
+                  return
+                }
+              }
+
+              if (update.length === 0) {
+                _ack(null)
+                return
+              }
+
+              // The nested objects created above will also have rels on the
+              // parent object, so fetch the node so that the rest of the updates
+              // can be added.
+              wire.get({"#": id}, async msg => {
+                if (msg.err) {
+                  _ack(`error getting ${id}: ${msg.err}`)
+                  return
+                }
+
+                let node = msg.put && msg.put[id]
+                if (!node) node = {}
+                update.forEach(key => {
+                  node[key] = data[key]
+                })
+                const g = await graph(id, node, ctx.user, _ack)
+                if (g === null) return
+
+                wire.put(g, _ack)
+              })
+            },
+            {secure: ctx.user || opt.secure},
+          )
         }
         attemptRead()
       },
@@ -556,8 +568,15 @@ const Holster = opt => {
         const {item, soul} = resolve({on: lex, _get: _get, _opt: _opt}, cb)
         if (!soul) return
 
+        // Get the context to check if it has user info
+        const ctx = allctx.get(ctxid)
+
         // Flag that this context is set from on and shouldn't be removed.
-        allctx.set(ctxid, {chain: [{item: item, soul: soul}], on: true})
+        allctx.set(ctxid, {
+          chain: [{item: item, soul: soul}],
+          on: true,
+          user: ctx ? ctx.user : null,
+        })
         // Map the user's callback because it can also be passed to off,
         // so need a reference to it to compare them.
         // Create a new context for each listener invocation to avoid mutation
@@ -574,7 +593,10 @@ const Holster = opt => {
                 const attemptRead = async (retries = 0) => {
                   const data = await new Promise(res => {
                     const _ctxid = utils.text.random()
-                    allctx.set(_ctxid, {chain: [{item: null, soul: id}]})
+                    allctx.set(_ctxid, {
+                      chain: [{item: null, soul: id}],
+                      user: ctx ? ctx.user : null,
+                    })
                     api(_ctxid).next(null, res, _opt)
                   })
                   if (data !== null || retries >= 5) {
@@ -591,7 +613,7 @@ const Holster = opt => {
                 cb(current !== undefined ? current : null)
               }
             },
-            _opt,
+            {..._opt, secure: ctx.user || opt.secure},
           )
         })
 
@@ -637,7 +659,7 @@ const Holster = opt => {
               map.get(cb)()
             }
           },
-          _opt,
+          {..._opt, secure: ctx.user || opt.secure},
         )
       },
       off: cb => {
