@@ -34,6 +34,7 @@ const Radisk = opt => {
   if (!opt.write) opt.write = 1 // Wait time before write in milliseconds
   if (!opt.size) opt.size = 1024 * 1024 // File size on disk, default 1MB
   if (!opt.memoryLimit) opt.memoryLimit = 500 // Memory limit in MB
+  if (!opt.readTimeout) opt.readTimeout = 1000 // Read timeout in milliseconds
   if (typeof opt.cache === "undefined") opt.cache = true
 
   if (!opt.store) {
@@ -126,20 +127,34 @@ const Radisk = opt => {
       // Check if there's already a pending read for this key
       if (pendingReads.has(key)) {
         // Add callback to existing pending read
-        pendingReads.get(key).push(cb)
+        pendingReads.get(key).callbacks.push(cb)
         return
       }
 
-      // Start new read and create callback queue
-      pendingReads.set(key, [cb])
+      // Start new read and create callback queue with fired flag
+      const pending = {callbacks: [cb], fired: false, timeoutId: null}
+      pendingReads.set(key, pending)
+
+      // Set a timeout to fire callbacks if read takes too long
+      pending.timeoutId = setTimeout(() => {
+        if (!pending.fired) {
+          pending.fired = true
+          pendingReads.delete(key)
+          const err = new Error("radisk read timeout")
+          pending.callbacks.forEach(callback => callback(err, undefined))
+        }
+      }, opt.readTimeout)
 
       const readStart = Date.now()
       return radisk.read(key, (err, result) => {
+        clearTimeout(pending.timeoutId)
         perfLog("read", readStart, key)
-        // Execute all pending callbacks for this key
-        const callbacks = pendingReads.get(key) || []
-        pendingReads.delete(key)
-        callbacks.forEach(callback => callback(err, result))
+        // Execute all pending callbacks for this key if timeout hasn't fired
+        if (!pending.fired) {
+          pending.fired = true
+          pendingReads.delete(key)
+          pending.callbacks.forEach(callback => callback(err, result))
+        }
       })
     }
 
