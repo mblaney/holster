@@ -211,7 +211,7 @@ const Store = opt => {
   const radisk = Radisk(opt)
 
   return {
-    get: (lex, cb, opt) => {
+    get: (lex, cb, _opt) => {
       if (!lex || !utils.obj.is(lex)) {
         cb("lex required")
         return
@@ -221,10 +221,10 @@ const Store = opt => {
         return
       }
 
-      if (!opt) opt = {}
+      if (!_opt) _opt = {}
 
       var soul = lex["#"]
-      var key = !opt.secure && typeof lex["."] === "string" ? lex["."] : ""
+      var key = !_opt.secure && typeof lex["."] === "string" ? lex["."] : ""
       var node
       var signatures = {}
       const each = (value, key) => {

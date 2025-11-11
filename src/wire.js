@@ -318,36 +318,40 @@ const Wire = opt => {
       return
     }
 
-    store.get(lex, (err, ack) => {
-      if (ack) {
-        // Also send request on the wire to check for updates.
+    store.get(
+      lex,
+      (err, ack) => {
+        if (ack) {
+          // Also send request on the wire to check for updates.
+          const sendResult = send(request)
+          if (sendResult && sendResult.err) {
+            cb({err: sendResult.err})
+            return
+          }
+          cb({put: ack, err: err})
+          return
+        }
+
+        if (err) console.log(err)
+
+        queue[track] = cb
+
+        // Store timeout config to start after message is sent from queue
+        pendingTimeouts.set(track, {
+          lex: lex,
+          wait: _opt.wait || 100,
+        })
+
         const sendResult = send(request)
         if (sendResult && sendResult.err) {
           cb({err: sendResult.err})
+          delete queue[track]
+          pendingTimeouts.delete(track)
           return
         }
-        cb({put: ack, err: err})
-        return
-      }
-
-      if (err) console.log(err)
-
-      queue[track] = cb
-
-      // Store timeout config to start after message is sent from queue
-      pendingTimeouts.set(track, {
-        lex: lex,
-        wait: _opt.wait || 100,
-      })
-
-      const sendResult = send(request)
-      if (sendResult && sendResult.err) {
-        cb({err: sendResult.err})
-        delete queue[track]
-        pendingTimeouts.delete(track)
-        return
-      }
-    }, _opt)
+      },
+      _opt,
+    )
   }
 
   const api = send => {
