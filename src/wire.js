@@ -197,6 +197,54 @@ const Wire = opt => {
   const rateLimiter = createRateLimiter(isTestEnv)
   const connectionManager = createConnectionManager(opt.maxConnections || 1000)
 
+  // The check function is required because user data must provide a public key
+  // so that it can be verified. The public key might verify the provided
+  // signature but not actually match the user under which the data is being
+  // stored. To avoid this, the current data on a soul needs to be checked to
+  // make sure the stored public key matches the one provided with the update.
+  const check = async (data, send, cb) => {
+    const key = utils.userPublicKey
+
+    for (const soul of Object.keys(data)) {
+      const msg = await new Promise(res => {
+        getWithCallback({"#": soul, ".": key}, res, send)
+      })
+      if (msg.err) {
+        if (cb) cb(msg.err)
+        return false
+      }
+
+      const node = data[soul]
+      // If there is no current node then the data is ok to write without
+      // matching public keys, as the provided soul also needs a rel on the
+      // parent node which then also requires checking. Otherwise public keys
+      // need to match for existing data. If the incoming update doesn't
+      // include a userPublicKey property at all, allow it - the update is
+      // not trying to change the public key.
+      if (
+        !msg.put ||
+        !msg.put[soul] ||
+        node[key] === undefined ||
+        msg.put[soul][key] === node[key]
+      ) {
+        continue
+      }
+
+      // If a soul exists but does not have a public key, then one should not be
+      // added because the node is not user data. The above check fails in this
+      // case if a public key is provided. Note that this is only an error case
+      // if called via the API, which is when a callback is provided here.
+      // (The wire spec can fetch and put data on the wire without a signature
+      // or public key and this can be ignored.)
+      if (cb) {
+        cb(`error in wire check public key does not match for soul: ${soul}`)
+      }
+      return false
+    }
+
+    return true
+  }
+
   const get = (msg, send) => {
     const ack = Get(msg.get, graph)
     if (ack) {
@@ -241,6 +289,8 @@ const Wire = opt => {
       return
     }
 
+    if (!(await check(update.now, send))) return
+
     store.put(update.now, err => {
       send(
         JSON.stringify({
@@ -249,6 +299,8 @@ const Wire = opt => {
           err: err,
         }),
       )
+      // Fire listeners after data is stored
+      update.listeners.forEach(cb => cb())
     })
 
     if (Object.keys(update.defer).length !== 0) {
@@ -342,6 +394,10 @@ const Wire = opt => {
           return
         }
 
+        if (!(await check(update.now, send, cb))) {
+          return
+        }
+
         // Seed pendingReferences with any new references from API calls
         for (const [soul, node] of Object.entries(update.now)) {
           if (node && typeof node === "object") {
@@ -355,7 +411,11 @@ const Wire = opt => {
           }
         }
 
-        store.put(update.now, cb)
+        store.put(update.now, err => {
+          if (cb) cb(err)
+          // Fire listeners after data is stored
+          update.listeners.forEach(l => l())
+        })
 
         // Always put data on the wire spec even if no local update needed
         const sendResult = send(

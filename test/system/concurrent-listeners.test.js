@@ -86,22 +86,23 @@ describe("system - concurrent listeners", () => {
     holster.get("race").put({value: "first"}, err => {
       assert.equal(err, null)
 
-      // Set up listener with once=true to read existing data
+      // Set up listener with _get=true to read existing data
+      // The listener will be called with the existing data via the get request
       holster.get("race").on(data => {
         results.push(data?.value)
       }, true)
 
-      // Immediately put new data
+      // Immediately put new data - listener will fire for this put as well
       setTimeout(() => {
         holster.get("race").put({value: "second"}, err => {
           assert.equal(err, null)
 
           setTimeout(() => {
-            // Should have received both values
+            // Should have received both values - one from get, one from put
             assert.equal(
               results.length >= 1,
               true,
-              "Should receive at least initial value",
+              "Should receive at least initial value from get",
             )
             assert.equal(results[0], "first", "First value should be 'first'")
             done()

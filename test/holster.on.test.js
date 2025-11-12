@@ -16,13 +16,17 @@ describe("holster.on", () => {
   })
 
   test("on for property on root then update - event", (t, done) => {
-    // Listener doesn't get called for initial put.
-    const callback = data => {
-      assert.equal(data, "update")
-      holster.get("key").off(callback)
-      done()
-    }
-    holster.get("key").on(callback)
+    // Listener is now called for initial put and updates
+    let callCount = 0
+    holster.get("key").on(data => {
+      callCount++
+      if (callCount === 1) {
+        assert.equal(data, "value")
+      } else if (callCount === 2) {
+        assert.equal(data, "update")
+        done()
+      }
+    })
 
     holster.get("key").put("value", err => {
       assert.equal(err, null)
@@ -37,19 +41,27 @@ describe("holster.on", () => {
     let done1 = false
     let done2 = false
 
+    let callback1Count = 0
     const callback1 = data => {
-      assert.equal(data, "update")
-      holster.get("two").off(callback1)
-      if (done2) done()
-      else done1 = true
+      callback1Count++
+      if (callback1Count === 2) {
+        assert.equal(data, "update")
+        holster.get("two").off(callback1)
+        if (done2) done()
+        else done1 = true
+      }
     }
     holster.get("two").on(callback1)
 
+    let callback2Count = 0
     const callback2 = data => {
-      assert.equal(data, "update")
-      holster.get("two").off(callback2)
-      if (done1) done()
-      else done2 = true
+      callback2Count++
+      if (callback2Count === 2) {
+        assert.equal(data, "update")
+        holster.get("two").off(callback2)
+        if (done1) done()
+        else done2 = true
+      }
     }
     holster.get("two").on(callback2)
 
@@ -80,11 +92,12 @@ describe("holster.on", () => {
     holster.get("key3").put("value3", err => {
       assert.equal(err, null)
 
-      let first = true
+      let callCount = 0
       holster.get("key3").on(data => {
-        if (first) {
+        callCount++
+        if (callCount === 1) {
           assert.equal(data, "update1")
-        } else {
+        } else if (callCount === 2) {
           assert.equal(data, "update2")
           done()
         }
@@ -95,7 +108,6 @@ describe("holster.on", () => {
       })
 
       setTimeout(() => {
-        first = false
         holster.get("key3").put("update2", err => {
           assert.equal(err, null)
         })
@@ -112,10 +124,14 @@ describe("holster.on", () => {
 
     // Need to wait until after all initial puts are done to set on listeners.
     setTimeout(() => {
+      let completed = 0
       for (let i = 0; i < 5; i++) {
-        holster.get("for" + i).on(data => {
-          assert.equal(data, "update" + i)
-          if (i === 4) done()
+        const idx = i // Capture value
+        holster.get("for" + idx).on(data => {
+          // Listener fires for updates (initial puts already completed before listener setup)
+          assert.equal(data, "update" + idx)
+          completed++
+          if (completed === 5) done()
         })
       }
 
@@ -154,6 +170,7 @@ describe("holster.on", () => {
           .get("hello")
           .next("world!")
           .on(data => {
+            // Listener fires for updates (initial put already completed before listener setup)
             assert.equal(data, "update")
             holster.get("hello").next("world!").off()
             done()
@@ -183,6 +200,7 @@ describe("holster.on", () => {
         number: 42,
       }
       holster.get("plain").on(data => {
+        // Listener fires for updates (initial put already completed before listener setup)
         assert.deepEqual(data, update)
         done()
       })
@@ -211,14 +229,20 @@ describe("holster.on", () => {
           has: "child update",
         },
       }
+      let parentFired = false
       holster.get("nested").on(data => {
-        assert.deepEqual(data, {key: nested.key, ...update})
+        // Listener fires for updates (initial put already completed before listener setup)
+        if (!parentFired) {
+          parentFired = true
+          assert.deepEqual(data, {key: nested.key, ...update})
+        }
       })
 
       holster
         .get("nested")
         .next("child")
         .on(data => {
+          // Listener fires for updates (initial put already completed before listener setup)
           assert.deepEqual(data, update.child)
           done()
         })

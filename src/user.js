@@ -29,7 +29,7 @@ const User = (opt, wire) => {
 
       const pub = pubs.shift()
       wire.get(
-        {"#": pub},
+        {"#": pub, ".": ["auth", "pub", "epub"]},
         async msg => {
           if (msg.err) {
             done(`error getting ${pub}: ${msg.err}`)

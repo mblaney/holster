@@ -1,7 +1,6 @@
 import * as utils from "./utils.js"
 import SEA from "./sea.js"
 
-const LISTENER_DELAY = 100
 // Maximum number of souls to keep in memory
 const MAX_GRAPH_SIZE = 10000
 
@@ -51,6 +50,7 @@ Ham.mix = async (change, graph, secure, listen) => {
   const machine = Date.now()
   const now = {}
   const defer = {}
+  const listeners = [] // Collect listeners to fire after store.put
   const validProperties = new Map() // Track valid properties per soul
   const validTimestamps = new Map() // Track valid timestamps per soul
   let wait = 0
@@ -187,30 +187,23 @@ Ham.mix = async (change, graph, secure, listen) => {
               graph[soul]._["s"][key] = now[soul]._["s"][key] = node._["s"][key]
             }
           }
-          // Call event listeners for update on key, mix is called before
-          // put has finished so wait for what could be multiple nested
-          // updates on a node.
+          // Collect event listeners to fire after store.put completes.
+          // This ensures listeners always fire with data that's been stored.
           if (listen[soul]) {
-            setTimeout(() => {
-              if (listen[soul]) {
-                listen[soul]
-                  .filter(l => utils.match(l["."], key))
-                  .forEach(l => l.cb())
-              }
-            }, LISTENER_DELAY)
+            listen[soul]
+              .filter(l => utils.match(l["."], key))
+              .forEach(l => listeners.push(l.cb))
           }
           updated = true
         }
       }
     }
 
-    // Call event listeners for update on soul.
+    // Collect event listeners for update on soul.
     if (updated && listen[soul]) {
-      setTimeout(() => {
-        if (listen[soul]) {
-          listen[soul].filter(l => utils.match(l["."])).forEach(l => l.cb())
-        }
-      }, LISTENER_DELAY)
+      listen[soul]
+        .filter(l => utils.match(l["."]))
+        .forEach(l => listeners.push(l.cb))
     }
   }
 
@@ -228,7 +221,7 @@ Ham.mix = async (change, graph, secure, listen) => {
     remove.forEach(({soul}) => delete graph[soul])
   }
 
-  return {now: now, defer: defer, wait: wait}
+  return {now: now, defer: defer, wait: wait, listeners: listeners}
 }
 
 export default Ham
