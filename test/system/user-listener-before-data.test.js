@@ -37,7 +37,8 @@ describe("system - user listener before data", () => {
 
         // Give listener time to fire
         setTimeout(() => {
-          // Should have received the test value
+          // With the new behavior, listener fires after data is stored
+          // Should have received the test value from the put
           const nonNull = results.filter(r => r !== null)
           assert.equal(
             nonNull.length >= 1,

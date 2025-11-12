@@ -118,6 +118,9 @@ export const match = (lex, key) => {
 
   if (typeof lex === "string") return lex === key
 
+  // Array support: check if key is in the array
+  if (Array.isArray(lex)) return lex.includes(key)
+
   if (!obj.is(lex) || !key) return false
 
   const prefix = lex["*"]

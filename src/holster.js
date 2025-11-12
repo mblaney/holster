@@ -673,17 +673,23 @@ const Holster = opt => {
         const {item, soul} = resolve({off: true}, cb)
         if (!soul) return
 
-        // Check if item is a rel and remove event listener for the node.
+        // Remove listener immediately from the original soul to avoid race condition.
+        // The listener may be on a related soul if item is a rel, but we remove
+        // from the original soul first since that's where it's initially registered.
+        wire.off({"#": soul}, map.get(cb))
+
+        // Check if item is a rel and remove from the related node as well.
         wire.get({"#": soul, ".": item}, msg => {
           if (msg.err) {
-            console.log(`error getting ${soul}.${item}: ${msg.err}`)
+            // Even if get fails, we've already removed from original soul
+            map.delete(cb)
+            allctx.delete(ctxid)
             return
           }
 
           const current = msg.put && msg.put[soul] && msg.put[soul][item]
           const id = utils.rel.is(current)
           if (id) wire.off({"#": id}, map.get(cb))
-          else wire.off({"#": soul}, map.get(cb))
           map.delete(cb)
           allctx.delete(ctxid)
         })
