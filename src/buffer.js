@@ -165,6 +165,14 @@ const processArrayLikeInput = input => {
   } else if (
     typeof input === "object" &&
     input !== null &&
+    typeof input.byteLength === "number"
+  ) {
+    // Handle ArrayBuffer from different contexts (e.g. jsdom)
+    validateBufferSize(input.byteLength, "ArrayBuffer-like processing")
+    bytes = new Uint8Array(input)
+  } else if (
+    typeof input === "object" &&
+    input !== null &&
     typeof input.length === "number"
   ) {
     // Handle array-like objects
@@ -184,7 +192,6 @@ const processArrayLikeInput = input => {
         )
       }
     }
-
     bytes = new Uint8Array(arr)
   } else {
     throw new TypeError("Unsupported input type: " + typeof input)
