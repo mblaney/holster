@@ -73,46 +73,7 @@ const User = (opt, wire) => {
             return
           }
 
-          // Migration: broadcast signed data on login if enabled
-          // Can be enabled by setting localStorage.setItem("holster_migrate_signatures", "true")
-          const migrationEnabled =
-            typeof globalThis.localStorage !== "undefined" &&
-            globalThis.localStorage.getItem("holster_migrate_signatures") ===
-              "true"
-
-          if (migrationEnabled) {
-            const migrationData = {}
-            for (const key of Object.keys(data)) {
-              if (
-                key !== "_" &&
-                key !== userPublicKey &&
-                key !== userSignature
-              ) {
-                migrationData[key] = data[key]
-              }
-            }
-            // Sign the timestamp for migration
-            const timestamp = Date.now()
-            const sig = await SEA.signTimestamp(timestamp, user.is)
-            const graph = utils.graph(
-              pub,
-              migrationData,
-              sig,
-              data.pub,
-              timestamp,
-            )
-            wire.put(graph, err => {
-              if (err) {
-                // Log migration error but don't fail authentication
-                console.log(
-                  `warning: failed to migrate signatures on login: ${err}`,
-                )
-              }
-              done(null)
-            })
-          } else {
-            done(null)
-          }
+          done(null)
         },
         {wait: 5000},
       )

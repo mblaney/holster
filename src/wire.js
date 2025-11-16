@@ -732,7 +732,7 @@ const Wire = opt => {
       queueProcessor = setTimeout(processQueue, 50)
     }
   }
-  if (!(opt.peers instanceof Array)) {
+  if (!(opt.peers instanceof Array) || opt.peers.length === 0) {
     opt.peers = [`ws://localhost:${opt.port || 8765}`]
   }
   opt.peers.forEach(peer => {
