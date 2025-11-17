@@ -11,11 +11,10 @@ const Ham = (state, currentState, value, currentValue, signed = false) => {
 
   if (state > currentState) return {incoming: true}
 
-  // state is equal to currentState
-  // If using signed timestamps then reject conflicting values because the
-  // owner can only create one value per timestamp.
+  // state is equal to currentState. Old data is expected to propagate through
+  // the network, but conflicting values with same signed timestamp are ignored
+  // since the owner can only create one value per timestamp.
   if (signed && value !== currentValue) {
-    console.log(`Signed timestamp ${state}: reject conflicting value`)
     return {historical: true}
   }
 
@@ -96,15 +95,36 @@ Ham.mix = async (change, graph, secure, listen) => {
       const signedTimestamps = new Set()
       const signedProperties = new Set()
 
-      // Verify timestamp signatures (numeric keys in node._["s"])
+      // Skip verification of timestamps that are older than what's in the graph
+      // to prevent old signatures from distributed messages causing conflicts
+      const incomingTimestamps = Object.entries(node._[">"] || {})
+
       for (const [key, sig] of Object.entries(node._["s"] || {})) {
         const asNumber = Number(key)
         if (!isNaN(asNumber) && asNumber > 0) {
+          // Check if this timestamp is for properties that already have newer
+          // versions in graph.
+          const hasNewerInGraph = incomingTimestamps.some(([prop, ts]) => {
+            if (Number(ts) === asNumber) {
+              const graphState =
+                graph[soul] && graph[soul]._[">"] ? graph[soul]._[">"][prop] : 0
+              // Skip verification if graph has a newer timestamp for property.
+              if (graphState > asNumber) {
+                return true
+              }
+            }
+            return false
+          })
+
+          if (hasNewerInGraph) {
+            continue
+          }
+
           const isValid = await SEA.verifyTimestamp(asNumber, sig, pub)
           if (isValid) {
             signedTimestamps.add(asNumber)
             // Add all properties with this timestamp to signed set
-            for (const [prop, ts] of Object.entries(node._[">"] || {})) {
+            for (const [prop, ts] of incomingTimestamps) {
               if (Number(ts) === asNumber) {
                 signedProperties.add(prop)
               }
@@ -113,9 +133,27 @@ Ham.mix = async (change, graph, secure, listen) => {
         }
       }
 
-      // Verify per-property signatures (backward compatibility)
-      const perPropertySignedProps = await SEA.verifyProperties(node, pub)
-      perPropertySignedProps.forEach(prop => signedProperties.add(prop))
+      // TODO: Remove per-property signature verification after old data has
+      // been cleared. Only check per-property signatures if there are
+      // properties without timestamp signatures.
+      const propertiesWithoutTimestampSigs = Object.keys(node).filter(k => {
+        if (k === "_" || k === utils.userPublicKey) return false
+        return !incomingTimestamps.some(
+          ([prop, ts]) => prop === k && signedTimestamps.has(Number(ts)),
+        )
+      })
+
+      if (propertiesWithoutTimestampSigs.length > 0) {
+        const nodeToVerify = {_: node._}
+        for (const prop of propertiesWithoutTimestampSigs) {
+          nodeToVerify[prop] = node[prop]
+        }
+        const perPropertySignedProps = await SEA.verifyProperties(
+          nodeToVerify,
+          pub,
+        )
+        perPropertySignedProps.forEach(prop => signedProperties.add(prop))
+      }
 
       // If no properties verified, skip this update
       if (signedProperties.size === 0) {

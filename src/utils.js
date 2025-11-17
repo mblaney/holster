@@ -89,21 +89,8 @@ export const graph = (soul, data, sig, pub, timestamp) => {
       g[soul]._[">"][key] = timestamp || Date.now()
     }
   }
-  // Store signatures in node._["s"]
-  // sig can be:
-  // - object: per-property signatures (legacy format)
-  // - string: timestamp signature (new format)
   if (sig && pub && timestamp) {
-    g[soul]._["s"] = {}
-    if (typeof sig === "string") {
-      // Timestamp signature: store with timestamp as key
-      g[soul]._["s"][timestamp] = sig
-    } else if (typeof sig === "object") {
-      // Per-property signatures: store with property names as keys
-      for (const [key, signature] of Object.entries(sig)) {
-        g[soul]._["s"][key] = signature
-      }
-    }
+    g[soul]._["s"] = {[timestamp]: sig}
     g[soul][userPublicKey] = pub
     g[soul]._[">"][userPublicKey] = timestamp
   }
