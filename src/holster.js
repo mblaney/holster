@@ -9,7 +9,7 @@ const Holster = opt => {
   else if (!utils.obj.is(opt)) opt = {}
 
   const wire = Wire(opt)
-  const user = User(null, wire)
+  const user = User(opt, wire)
   // Map callbacks since the user's callback is not passed to wire.on.
   const map = new Map()
   // Allow concurrent calls to the api by storing each context.

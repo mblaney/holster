@@ -9,6 +9,7 @@ describe("system - user listener before data", () => {
   const holster = Holster({
     file: "test/system/user-listener-before-data",
     wss: wss,
+    wait: 500,
   })
   const user = holster.user()
 
