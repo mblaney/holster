@@ -6,7 +6,7 @@ import User from "../src/user.js"
 
 describe("user", () => {
   const wss = new Server("ws://localhost:1234")
-  const user = User({file: "test/user", wss: wss, maxAge: 100})
+  const user = User({file: "test/user", wss: wss, maxAge: 100, wait: 500})
 
   test("create", (t, done) => {
     user.create("alice", "password", err => {

@@ -10,6 +10,7 @@ describe("holster.user.put", () => {
     file: "test/holster.user.put",
     wss: wss,
     maxAge: 100,
+    wait: 500,
   })
   const user = holster.user()
   let alice = ""

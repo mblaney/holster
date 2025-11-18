@@ -589,11 +589,11 @@ const Wire = opt => {
           return
         }
 
-        const processMessage = () => {
+        const processMessage = async () => {
           dup.track(msg["#"])
 
           if (msg.get) get(msg, send)
-          if (msg.put) put(msg, send)
+          if (msg.put) await put(msg, send)
           send(data, isBinary)
 
           const id = msg["@"]
@@ -807,7 +807,7 @@ const Wire = opt => {
           if (Object.keys(filteredPut).length > 0) {
             // Create filtered message for Ham.mix with original message ID
             const filteredMsg = {put: filteredPut, "#": msg["#"]}
-            put(filteredMsg, send)
+            await put(filteredMsg, send)
           }
         }
 

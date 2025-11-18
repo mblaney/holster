@@ -6,7 +6,12 @@ import Holster from "../src/holster.js"
 
 describe("holster.user.on", () => {
   const wss = new Server("ws://localhost:1234")
-  const holster = Holster({file: "test/holster.user.on", wss: wss, maxAge: 100})
+  const holster = Holster({
+    file: "test/holster.user.on",
+    wss: wss,
+    maxAge: 100,
+    wait: 500,
+  })
   const user = holster.user()
 
   test("user create", (t, done) => {

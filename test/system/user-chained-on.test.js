@@ -6,7 +6,11 @@ import Holster from "../../src/holster.js"
 
 describe("system - user chained get with on", () => {
   const wss = new Server("ws://localhost:9012")
-  const holster = Holster({file: "test/system/user-chained-on", wss: wss})
+  const holster = Holster({
+    file: "test/system/user-chained-on",
+    wss: wss,
+    wait: 500,
+  })
   const user = holster.user()
 
   test("user create and auth", (t, done) => {
