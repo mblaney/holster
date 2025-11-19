@@ -64,35 +64,46 @@ const fileSystem = opt => {
 
   if (opt.indexedDB) {
     let db
-    const o = indexedDB.open(dir, 1)
-    o.onupgradeneeded = event => {
-      event.target.result.createObjectStore(dir)
-    }
-    o.onerror = event => {
-      console.log(event)
-    }
-    o.onsuccess = () => {
-      db = o.result
-      // Create the root node if it doesn't exist.
-      if (db) {
-        const tx = db.transaction([dir], "readonly")
-        const req = tx.objectStore(dir).getKey("!")
-        req.onerror = () => {
-          console.log(`error getting key ${dir}/!`)
-        }
-        req.onsuccess = () => {
-          if (!req.result) {
-            const tx = db.transaction([dir], "readwrite")
-            const req = tx.objectStore(dir).put(root, "!")
-            req.onerror = () => {
-              console.log(`error putting root on ${dir}/!`)
+    const dbReady = new Promise((resolve, reject) => {
+      const o = indexedDB.open(dir, 1)
+      o.onupgradeneeded = event => {
+        event.target.result.createObjectStore(dir)
+      }
+      o.onerror = event => {
+        console.log(event)
+        reject(event)
+      }
+      o.onsuccess = () => {
+        db = o.result
+        // Create the root node if it doesn't exist.
+        if (db) {
+          const tx = db.transaction([dir], "readonly")
+          const req = tx.objectStore(dir).getKey("!")
+          req.onerror = () => {
+            console.log(`error getting key ${dir}/!`)
+            reject(req.error)
+          }
+          req.onsuccess = () => {
+            if (!req.result) {
+              const tx = db.transaction([dir], "readwrite")
+              const req = tx.objectStore(dir).put(root, "!")
+              req.onerror = () => {
+                console.log(`error putting root on ${dir}/!`)
+                reject(req.error)
+              }
+              req.onsuccess = () => {
+                resolve()
+              }
+            } else {
+              resolve()
             }
           }
+        } else {
+          console.log("error indexedDB not available")
+          reject(new Error("indexedDB not available"))
         }
-      } else {
-        console.log("error indexedDB not available")
       }
-    }
+    })
 
     return {
       get: (file, cb) => {
@@ -106,24 +117,14 @@ const fileSystem = opt => {
             cb(null, req.result)
           }
         }
-        if (db) {
-          _get(file, cb)
-          return
-        }
 
-        let retry = 0
-        const interval = setInterval(() => {
-          if (db) {
-            clearInterval(interval)
+        dbReady
+          .then(() => {
             _get(file, cb)
-            return
-          }
-
-          if (retry++ > 5) {
-            clearInterval(interval)
-            cb("error indexedDB not available")
-          }
-        }, 1000)
+          })
+          .catch(err => {
+            cb(err)
+          })
       },
       put: (file, data, cb) => {
         const _put = (file, data, cb) => {
@@ -136,24 +137,14 @@ const fileSystem = opt => {
             cb(null)
           }
         }
-        if (db) {
-          _put(file, data, cb)
-          return
-        }
 
-        let retry = 0
-        const interval = setInterval(() => {
-          if (db) {
-            clearInterval(interval)
+        dbReady
+          .then(() => {
             _put(file, data, cb)
-            return
-          }
-
-          if (retry++ > 5) {
-            clearInterval(interval)
-            cb("error indexedDB not available")
-          }
-        }, 1000)
+          })
+          .catch(err => {
+            cb(err)
+          })
       },
       list: cb => {
         const _list = cb => {
@@ -165,25 +156,15 @@ const fileSystem = opt => {
             cb()
           }
         }
-        if (db) {
-          _list(cb)
-          return
-        }
 
-        let retry = 0
-        const interval = setInterval(() => {
-          if (db) {
-            clearInterval(interval)
+        dbReady
+          .then(() => {
             _list(cb)
-            return
-          }
-
-          if (retry++ > 5) {
-            clearInterval(interval)
-            console.log("error indexedDB not available")
+          })
+          .catch(err => {
+            console.log("error indexedDB not available:", err)
             cb()
-          }
-        }, 1000)
+          })
       },
     }
   }
