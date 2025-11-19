@@ -1,6 +1,6 @@
 import {match, userPublicKey} from "./utils.js"
 
-const Get = (lex, graph) => {
+const Get = (lex, graph, fast) => {
   if (!lex || typeof lex !== "object") {
     throw new TypeError("lex must be an object")
   }
@@ -47,6 +47,10 @@ const Get = (lex, graph) => {
       }
     }
   } else {
+    // For fast requests, return properties currently in the graph. Otherwise
+    // return undefined to ensure we get all matching properties from store.
+    if (!fast) return
+
     for (const key of Object.keys(graph[soul])) {
       // Always include userPublicKey for verification, regardless of filter
       if (key === userPublicKey || match(lex["."], key)) {
