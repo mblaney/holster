@@ -316,7 +316,7 @@ const Wire = opt => {
 
     if (!utils.obj.is(_opt)) _opt = {}
 
-    const ack = Get(lex, graph)
+    const ack = Get(lex, graph, _opt.fast)
     const track = utils.text.random(9)
     const request = JSON.stringify({
       "#": dup.track(track),
