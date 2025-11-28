@@ -3,9 +3,9 @@
  * Provides get and put methods with filesystem or IndexedDB backend
  */
 
-import Radisk from "./radisk.js"
-import Radix from "./radix.js"
-import * as utils from "./utils.js"
+import Radisk from "./radisk.ts"
+import Radix from "./radix.ts"
+import * as utils from "./utils.ts"
 import type {
   Lex,
   Graph,
@@ -13,7 +13,7 @@ import type {
   StoreOptions,
   FileSystemInterface,
   EncodedValue,
-} from "./schemas.js"
+} from "./schemas.ts"
 
 const isNode = typeof document === "undefined"
 

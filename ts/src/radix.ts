@@ -3,8 +3,8 @@
  * Supports prefix-based key compression
  */
 
-import * as utils from "./utils.js"
-import type { EncodedValue, RadixFunction } from "./schemas.js"
+import * as utils from "./utils.ts"
+import type { EncodedValue, RadixFunction } from "./schemas.ts"
 
 // ASCII character for group separator
 const group = String.fromCharCode(29)

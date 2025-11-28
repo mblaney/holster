@@ -510,10 +510,10 @@ export type Dup = z.infer<typeof DupSchema> & {
 // ============================================================================
 
 // Export RadiskInterface from radisk module for test usage
-export type { RadiskInterface } from "./radisk.js"
+export type { RadiskInterface } from "./radisk.ts"
 
 // Export other interfaces for test usage
-export type { WireAPI as WireInterface } from "./wire.js"
-export type { UserInterface } from "./user.js"
-export type { StoreInterface } from "./store.js"
+export type { WireAPI as WireInterface } from "./wire.ts"
+export type { UserInterface } from "./user.ts"
+export type { StoreInterface } from "./store.ts"
 

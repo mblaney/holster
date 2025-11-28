@@ -3,7 +3,7 @@
  * Compatible with Node.js Buffer API but with enhanced security checks
  */
 
-import SeaArray from "./array.js"
+import SeaArray from "./array.ts"
 
 type Encoding = "utf8" | "utf-8" | "hex" | "base64" | "binary" | "latin1" | "ascii"
 

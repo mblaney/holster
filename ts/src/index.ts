@@ -6,30 +6,30 @@
  */
 
 // Main API
-export { default as Holster, type HolsterAPI } from "./holster.js"
+export { default as Holster, type HolsterAPI } from "./holster.ts"
 
 // Core modules
-export { default as Wire, type WireAPI } from "./wire.js"
-export { default as User, type UserInterface } from "./user.js"
-export { default as SEA } from "./sea.js"
-export { default as Store, type StoreInterface } from "./store.js"
+export { default as Wire, type WireAPI } from "./wire.ts"
+export { default as User, type UserInterface } from "./user.ts"
+export { default as SEA } from "./sea.ts"
+export { default as Store, type StoreInterface } from "./store.ts"
 
 // Data structure modules
-export { default as Ham } from "./ham.js"
-export { default as Get } from "./get.js"
-export { default as Radisk } from "./radisk.js"
-export { default as Radix } from "./radix.js"
-export { default as Dup, type DupInterface } from "./dup.js"
+export { default as Ham } from "./ham.ts"
+export { default as Get } from "./get.ts"
+export { default as Radisk } from "./radisk.ts"
+export { default as Radix } from "./radix.ts"
+export { default as Dup, type DupInterface } from "./dup.ts"
 
 // Utilities
-export * as utils from "./utils.js"
-export * as seaUtils from "./sea-utils.js"
-export { default as SafeBuffer } from "./buffer.js"
-export { default as SeaArray } from "./array.js"
+export * as utils from "./utils.ts"
+export * as seaUtils from "./sea-utils.ts"
+export { default as SafeBuffer } from "./buffer.ts"
+export { default as SeaArray } from "./array.ts"
 
 // Types and Schemas
-export * from "./schemas.js"
+export * from "./schemas.ts"
 
 // Default export
-export { default } from "./holster.js"
+export { default } from "./holster.ts"
 

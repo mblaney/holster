@@ -3,8 +3,8 @@
  * Provides helpers for encryption, hashing, and key management
  */
 
-import SafeBuffer from "./buffer.js"
-import type { JWK } from "./schemas.js"
+import SafeBuffer from "./buffer.ts"
+import type { JWK } from "./schemas.ts"
 
 const isNode = typeof document === "undefined"
 
@@ -99,5 +99,5 @@ const keyToJwk = (key: SeaArray): JWK => {
 }
 
 // Re-export SeaArray type for convenience
-import type SeaArray from "./array.js"
+import type SeaArray from "./array.ts"
 

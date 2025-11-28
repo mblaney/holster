@@ -2,8 +2,8 @@ import fs from "fs"
 import { Server } from "mock-socket"
 import { describe, test } from "node:test"
 import assert from "node:assert/strict"
-import User from "../src/user.js"
-import type { UserInterface } from "../src/schemas.js"
+import User from "../src/user.ts"
+import type { UserInterface } from "../src/schemas.ts"
 
 describe("user", () => {
   const wss: Server = new Server("ws://localhost:1234")

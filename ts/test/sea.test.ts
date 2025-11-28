@@ -1,7 +1,7 @@
 import { describe, test } from "node:test"
 import assert from "node:assert/strict"
-import SEA from "../src/sea.js"
-import type { UserPair, EncryptedData, SignedData } from "../src/schemas.js"
+import SEA from "../src/sea.ts"
+import type { UserPair, EncryptedData, SignedData } from "../src/schemas.ts"
 
 // The JWK format uses "base64url" encoding, which means "+" replaced with "-"
 // and "/" with "_" and removing "=" padding. So public and private keys here

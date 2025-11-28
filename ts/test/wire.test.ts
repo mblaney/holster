@@ -2,8 +2,8 @@ import fs from "fs"
 import { Server } from "mock-socket"
 import { describe, test } from "node:test"
 import assert from "node:assert/strict"
-import Wire from "../src/wire.js"
-import type { WireInterface } from "../src/schemas.js"
+import Wire from "../src/wire.ts"
+import type { WireInterface } from "../src/schemas.ts"
 
 describe("wire", () => {
   // Need different websocket servers otherwise data on file will sync up.

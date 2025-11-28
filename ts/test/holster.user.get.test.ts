@@ -2,8 +2,8 @@ import fs from "fs"
 import { Server } from "mock-socket"
 import {describe, test} from "node:test"
 import assert from "node:assert/strict"
-import Holster from "../src/holster.js"
-import type { HolsterAPI } from "../src/holster.js"
+import Holster from "../src/holster.ts"
+import type { HolsterAPI } from "../src/holster.ts"
 
 describe("holster.user.get", () => {
   const wss: Server = new Server("ws://localhost:1234")

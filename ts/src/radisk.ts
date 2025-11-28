@@ -3,10 +3,10 @@
  * Provides disk-backed radix tree with caching and batching
  */
 
-import Radix from "./radix.js"
-import type { RadixFunction } from "./schemas.js"
-import * as utils from "./utils.js"
-import type { EncodedValue, RadiskOptions, GraphValue, Relation } from "./schemas.js"
+import Radix from "./radix.ts"
+import type { RadixFunction } from "./schemas.ts"
+import * as utils from "./utils.ts"
+import type { EncodedValue, RadiskOptions, GraphValue, Relation } from "./schemas.ts"
 
 // ASCII character for end of text
 const etx = String.fromCharCode(3)

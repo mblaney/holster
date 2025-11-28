@@ -1,7 +1,7 @@
 import { describe, test } from "node:test"
 import assert from "node:assert/strict"
-import Store from "../src/store.js"
-import type { Graph, Lex, StoreInterface } from "../src/schemas.js"
+import Store from "../src/store.ts"
+import type { Graph, Lex, StoreInterface } from "../src/schemas.ts"
 import fs from "fs"
 
 describe("store", () => {

@@ -3,10 +3,10 @@
  * Provides chainable interface for get, put, on, off operations
  */
 
-import * as utils from "./utils.js"
-import Wire, { type WireAPI } from "./wire.js"
-import User, { type UserInterface } from "./user.js"
-import SEA from "./sea.js"
+import * as utils from "./utils.ts"
+import Wire, { type WireAPI } from "./wire.ts"
+import User, { type UserInterface } from "./user.ts"
+import SEA from "./sea.ts"
 import type {
   HolsterOptions,
   ChainItem,
@@ -18,7 +18,7 @@ import type {
   LexWithDot,
   UserIdentity,
   WireOptions,
-} from "./schemas.js"
+} from "./schemas.ts"
 
 /**
  * Holster API interface

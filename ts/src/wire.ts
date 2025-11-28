@@ -3,11 +3,11 @@
  * Handles message routing, rate limiting, and graph synchronization
  */
 
-import Dup from "./dup.js"
-import Get from "./get.js"
-import Ham from "./ham.js"
-import Store from "./store.js"
-import * as utils from "./utils.js"
+import Dup from "./dup.ts"
+import Get from "./get.ts"
+import Ham from "./ham.ts"
+import Store from "./store.ts"
+import * as utils from "./utils.ts"
 import type {
   Graph,
   WireMessage,
@@ -16,7 +16,7 @@ import type {
   ListenMap,
   HolsterOptions,
   GraphValue,
-} from "./schemas.js"
+} from "./schemas.ts"
 
 // Unified WebSocket type that works for both Node.js ws and browser WebSocket
 type UnifiedWebSocket = WebSocket & {
