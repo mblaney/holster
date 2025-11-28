@@ -106,32 +106,37 @@ export type GraphNode = z.infer<typeof GraphNodeSchema>
 # Compile TypeScript source
 npm run build:ts
 
-# Compile source + tests
+# Compile source + tests (optional - for production builds)
 npm run build:ts && npx tsc --project tsconfig.test.json
 
 # Watch mode (auto-rebuild on changes)
 npx tsc --watch
 ```
 
-**Output:** Compiled files go to `dist/src/` and `dist/test/`
+**Output:** Compiled files go to `dist/src/` and `dist/test/`  
+**Note:** Compilation is optional - tests run directly on `.ts` files
 
 ### Testing
 
 ```bash
-# Run all tests
-npm test
-# or
-node --test dist/test/*.test.js dist/test/system/*.test.js
+# Run all TypeScript tests (recommended)
+npm run test:ts
+# or manually
+node --test ts/test/**/*.test.ts ts/test/system/**/*.test.ts
 
 # Run specific test suite
-node --test dist/test/holster.get.test.js
+node --test ts/test/holster.get.test.ts
 
 # Run with filter
-node --test --test-name-pattern="put and get"
+node --test --test-name-pattern="put and get" ts/test/**/*.test.ts
+
+# Run only system tests
+npm run test:ts:system
 ```
 
 **Test Framework:** Node.js native test runner  
-**Assertions:** `node:assert/strict`
+**Assertions:** `node:assert/strict`  
+**Note:** Tests run directly on TypeScript files (no compilation needed)
 
 ### Type Checking
 
@@ -423,20 +428,19 @@ const radisk = Radisk({
 
 ### Enable Debug Logging
 
-```typescript
-// Add console.log statements in source
-// Rebuild and run tests
-npm run build:ts && node --test dist/test/your-test.js
+```bash
+# Add console.log statements in source and run tests directly
+node --test ts/test/your-test.test.ts
 
-// Or use Node.js inspector
-node --inspect-brk --test dist/test/your-test.js
+# Or use Node.js inspector
+node --inspect-brk --test ts/test/your-test.test.ts
 ```
 
 ### Common Issues
 
 **"Cannot find module" errors:**
-- Ensure imports use `.js` extensions
-- Check `dist/` folder exists (run `npm run build:ts`)
+- Ensure imports use `.ts` extensions for TypeScript files
+- Check that all dependencies are installed (`npm install`)
 
 **Type errors in tests:**
 - Add type assertions: `as unknown as Type`
