@@ -6,7 +6,13 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test",
-    "build": "esbuild src/holster.js --bundle --format=esm --sourcemap \"--external:node:*\" \"--external:ws\" --minify --outdir=build"
+    "test:ts": "node --test ts/test/**/*.test.ts",
+    "test:ts:system": "node --test ts/test/system/**/*.test.ts",
+    "build": "esbuild src/holster.js --bundle --format=esm --sourcemap \"--external:node:*\" \"--external:ws\" --minify --outdir=build",
+    "build:ts": "tsc",
+    "build:all": "npm run build:ts && npm run build",
+    "type-check": "tsc --noEmit",
+    "type-check:tests": "tsc --noEmit --project tsconfig.test.json"
   },
   "keywords": [],
   "author": "Malcolm Blaney",
@@ -14,12 +20,16 @@
   "dependencies": {
     "express": "^5.1.0",
     "fs": "^0.0.1-security",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
     "esbuild": "0.25.3",
     "mock-socket": "^9.3.1",
-    "prettier": "^3.4.2"
+    "prettier": "^3.4.2",
+    "typescript": "^5.9.3"
   },
   "prettier": {
     "semi": false,

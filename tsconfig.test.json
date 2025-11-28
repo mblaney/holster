@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /* Relaxed type checking for test files */
+    "noImplicitAny": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "strict": false
+  },
+  "include": ["ts/test/**/*"],
+  "exclude": ["node_modules"]
+}
+
