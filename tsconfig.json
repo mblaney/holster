@@ -10,7 +10,8 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./ts",
-    "noEmit": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     
     /* Strict Type Checking */
     "strict": true,

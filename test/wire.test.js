@@ -42,7 +42,6 @@ describe("wire", () => {
   test("get node", (t, done) => {
     kitty.get({"#": "FDSA"}, msg => {
       assert.deepEqual(msg, {
-        err: undefined,
         put: {
           FDSA: {
             _: {
@@ -68,7 +67,6 @@ describe("wire", () => {
   test("get item", (t, done) => {
     kitty.get({"#": "FDSA", ".": "species"}, msg => {
       assert.deepEqual(msg, {
-        err: undefined,
         put: {
           FDSA: {
             _: {

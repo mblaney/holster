@@ -6,14 +6,21 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test",
-    "test:ts": "node --test ts/test/**/*.test.ts",
-    "test:ts:system": "node --test ts/test/system/**/*.test.ts",
+    "test:ts": "node --test --import tsx/esm ts/test/**/*.test.ts",
+    "test:ts:system": "node --test --import tsx/esm ts/test/system/**/*.test.ts",
     "build": "esbuild src/holster.js --bundle --format=esm --sourcemap \"--external:node:*\" \"--external:ws\" --minify --outdir=build",
-    "build:ts": "tsc",
-    "build:all": "npm run build:ts && npm run build",
+    "build:ts": "esbuild ts/src/holster.ts --bundle --format=esm --sourcemap \"--external:node:*\" \"--external:ws\" --minify --outdir=dist",
+    "build:all": "npm run build && npm run build:ts",
+    "prepublishOnly": "npm run build:all",
     "type-check": "tsc --noEmit",
     "type-check:tests": "tsc --noEmit --project tsconfig.test.json"
   },
+  "files": [
+    "src",
+    "ts/src",
+    "build",
+    "dist"
+  ],
   "keywords": [],
   "author": "Malcolm Blaney",
   "license": "Zlib, MIT, Apache-2.0",
@@ -29,6 +36,7 @@
     "esbuild": "0.25.3",
     "mock-socket": "^9.3.1",
     "prettier": "^3.4.2",
+    "tsx": "^4.0.0",
     "typescript": "^5.9.3"
   },
   "prettier": {

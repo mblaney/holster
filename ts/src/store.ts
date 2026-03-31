@@ -127,6 +127,7 @@ const fileSystem = (opt: StoreOptions): FileSystemInterface => {
           const req = tx.objectStore(dir).get(file)
           req.onerror = () => {
             console.log(`error getting ${dir}/${file}`)
+            cb(req.error as unknown as string)
           }
           req.onsuccess = () => {
             cb(null, req.result)
@@ -151,6 +152,7 @@ const fileSystem = (opt: StoreOptions): FileSystemInterface => {
           const req = tx.objectStore(dir).put(data, file)
           req.onerror = () => {
             console.log(`error putting data on ${dir}/${file}`)
+            cb(req.error as unknown as string)
           }
           req.onsuccess = () => {
             cb(null)
@@ -169,7 +171,10 @@ const fileSystem = (opt: StoreOptions): FileSystemInterface => {
         const _list = (cb: (file?: string) => void) => {
           const tx = db.transaction([dir], "readonly")
           const req = tx.objectStore(dir).getAllKeys()
-          req.onerror = () => console.log("error getting keys for", dir)
+          req.onerror = () => {
+            console.log("error getting keys for", dir)
+            cb()
+          }
           req.onsuccess = () => {
             ;(req.result as string[]).forEach(cb)
             cb()
@@ -248,9 +253,7 @@ const Store = (opt?: StoreOptions): StoreInterface => {
         node._[">"][key] = value[1]
         // If signature is present, store it in _["s"]
         if (value.length === 3 && value[2]) {
-          const state = value[1]
-          signatures[state.toString()] = value[2]
-          signatures[key] = value[2]
+          signatures[value[1].toString()] = value[2]
         }
       }
 

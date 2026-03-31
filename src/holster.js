@@ -132,6 +132,30 @@ const Holster = opt => {
       }
     }
 
+    const watchForRel = (soul, item, ctx, i, request, cb) => {
+      const handler = () => {
+        // Bail out if the context was removed by off().
+        if (!allctx.has(ctxid)) {
+          wire.off({"#": soul, ".": item}, handler)
+          return
+        }
+        wire.get(
+          {"#": soul, ".": item},
+          msg => {
+            const node = msg.put && msg.put[soul]
+            const id = utils.rel.is(node && node[item])
+            if (!id) return
+            wire.off({"#": soul, ".": item}, handler)
+            ctx.chain[i].soul = id
+            allctx.set(ctxid, {...ctx})
+            api(ctxid).on(request.on, cb, request._get, request._opt)
+          },
+          {...request._opt, secure: ctx.user || opt.secure},
+        )
+      }
+      wire.on({"#": soul, ".": item}, handler, false, request._opt)
+    }
+
     const resolve = (request, cb) => {
       if (!request) {
         console.log("error resolve request parameter required")
@@ -201,8 +225,10 @@ const Holster = opt => {
                   api(ctxid).put(request.put, cb)
                 })
               } else if (on) {
-                // Allow listening to a node that doesn't exist.
-                cb(null)
+                // Item is not a rel yet — watch the parent soul for when it
+                // becomes one, then retry chain resolution.
+                watchForRel(soul, item, ctx, i, request, cb)
+                if (request._get) cb(null)
               } else if (off) {
                 // Allow stop listening to a node that doesn't exist.
                 if (cb) cb(null)
@@ -225,8 +251,14 @@ const Holster = opt => {
                 api(ctxid).put(request.put, cb)
               })
             } else {
-              // Allow querying a node that doesn't exist.
-              if (cb) cb(null)
+              if (on) {
+                // Node doesn't exist yet — watch for it to appear.
+                watchForRel(soul, item, ctx, i, request, cb)
+                if (request._get) cb(null)
+              } else {
+                // Allow querying a node that doesn't exist.
+                if (cb) cb(null)
+              }
             }
           },
           {...request._opt, secure: ctx.user || opt.secure},
@@ -521,25 +553,16 @@ const Holster = opt => {
                 return
               }
 
-              // The nested objects created above will also have rels on the
-              // parent object, so fetch the node so that the rest of the
-              // updates can be added.
-              wire.get({"#": id}, async msg => {
-                if (msg.err) {
-                  _ack(`error getting ${id}: ${msg.err}`)
-                  return
-                }
-
-                let node = msg.put && msg.put[id]
-                if (!node) node = {}
-                update.forEach(key => {
-                  node[key] = data[key]
-                })
-                const g = await graph(id, node, ctx.user, _ack)
-                if (g === null) return
-
-                wire.put(g, _ack)
+              // Only write the primitive update keys. Rels created by the
+              // recursive puts above are already in the in-memory graph.
+              const updateNode = {}
+              update.forEach(key => {
+                updateNode[key] = data[key]
               })
+              const g = await graph(id, updateNode, ctx.user, _ack)
+              if (g === null) return
+
+              wire.put(g, _ack)
             },
             {secure: ctx.user || opt.secure},
           )
@@ -579,13 +602,28 @@ const Holster = opt => {
         })
         // Map the user's callback because it can also be passed to off,
         // so need a reference to it to compare them.
-        // Create a new context for each listener invocation to avoid mutation
+        // Shared retry state for this on() subscription.
+        let retryCount = 0
+        const maxRetries = 5
+        const retryDelay = 1000 // Start with 1 second
+        let retryTimer = null
+
         map.set(cb, () => {
+          // Bail out if off() has already cleaned up this context — the mapped
+          // callback can fire twice (once from wire.on and once from the _get
+          // immediate-read path) and the second call after async context cleanup
+          // would crash in resolve(). Matches the guard in watchForRel.
+          if (!allctx.has(ctxid)) return
+          // Cancel any pending retry — the persistent listener firing means we
+          // have an update and should not call cb twice.
+          clearTimeout(retryTimer)
+          retryTimer = null
           // When listener fires, re-check if the item is now a rel.
           wire.get(
             {"#": soul, ".": item},
             msg => {
-              const current = msg.put && msg.put[soul] && msg.put[soul][item]
+              const node = msg.put && msg.put[soul]
+              const current = node && node[item]
               const id = utils.rel.is(current)
               if (id) {
                 // It's a rel, read the related node. It might not be in the
@@ -597,9 +635,10 @@ const Holster = opt => {
                       chain: [{item: null, soul: id}],
                       user: ctx ? ctx.user : null,
                     })
-                    api(_ctxid).next(null, res, _opt)
+                    api(_ctxid).next(null, res, retries === 0 ? utils.obj.put(_opt, "fast", true) : _opt)
                   })
                   if (data !== null || retries >= 5) {
+                    retryCount = 0 // Reset retry counter on success
                     cb(data)
                   } else {
                     // Data not ready, retry after delay
@@ -609,8 +648,46 @@ const Holster = opt => {
                 }
                 attemptRead()
               } else {
-                // It's a direct property or null
-                cb(current !== undefined ? current : null)
+                // It's a direct property or null.
+                const nodeExists = !!node
+
+                if (nodeExists) {
+                  // Node exists — return the value and reset retry state.
+                  retryCount = 0
+                  cb(current !== undefined ? current : null)
+                } else if (retryCount < maxRetries) {
+                  // No data yet — keep polling until we get a response or
+                  // exhaust retries. on() with _get can return null on a cache
+                  // miss and never fire again if the data doesn't change while
+                  // the listener is attached, so we must poll for initial load.
+                  const retry = () => {
+                    const delay = Math.min(retryDelay * Math.pow(2, retryCount), 30000)
+                    retryCount++
+                    retryTimer = setTimeout(() => {
+                      wire.get(
+                        {"#": soul, ".": item},
+                        msg => {
+                          const retryNode = msg.put && msg.put[soul]
+                          if (retryNode) {
+                            retryCount = 0
+                            retryTimer = null
+                            const retryValue = retryNode[item]
+                            cb(retryValue !== undefined ? retryValue : null)
+                          } else if (retryCount < maxRetries) {
+                            retry()
+                          } else {
+                            retryTimer = null
+                            cb(null)
+                          }
+                        },
+                        {..._opt, secure: ctx.user || opt.secure},
+                      )
+                    }, delay)
+                  }
+                  retry()
+                } else {
+                  cb(null)
+                }
               }
             },
             {..._opt, secure: ctx.user || opt.secure},
@@ -653,7 +730,8 @@ const Holster = opt => {
               let relLex
               if (lex) relLex = utils.obj.put(initialLex, "#", id)
               else relLex = {"#": id, ".": null}
-              wire.on(relLex, map.get(cb), _get, _opt)
+              wire.on(relLex, map.get(cb), false, _opt)
+              if (_get) map.get(cb)()
             } else if (_get) {
               // Not a rel, but _get was requested, so trigger callback.
               map.get(cb)()

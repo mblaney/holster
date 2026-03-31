@@ -129,18 +129,18 @@ Ham.mix = async (
       for (const [key, sig] of Object.entries(node._["s"] || {})) {
         const asNumber = Number(key)
         if (!isNaN(asNumber) && asNumber > 0) {
-          const hasNewerInGraph = incomingTimestamps.some(([prop, ts]) => {
-            if (Number(ts) === asNumber) {
+          const propsForTimestamp = incomingTimestamps.filter(
+            ([, ts]) => Number(ts) === asNumber,
+          )
+          const allNewerInGraph =
+            propsForTimestamp.length > 0 &&
+            propsForTimestamp.every(([prop]) => {
               const graphState =
                 graph[soul] && graph[soul]!._[">"] ? graph[soul]!._[">"][prop] : 0
-              if (graphState && graphState > asNumber) {
-                return true
-              }
-            }
-            return false
-          })
+              return graphState !== undefined && graphState > asNumber
+            })
 
-          if (hasNewerInGraph) {
+          if (allNewerInGraph) {
             continue
           }
 
@@ -154,25 +154,6 @@ Ham.mix = async (
             }
           }
         }
-      }
-
-      const propertiesWithoutTimestampSigs = Object.keys(node).filter(k => {
-        if (k === "_" || k === utils.userPublicKey) return false
-        return !incomingTimestamps.some(
-          ([prop, ts]) => prop === k && signedTimestamps.has(Number(ts))
-        )
-      })
-
-      if (propertiesWithoutTimestampSigs.length > 0) {
-        const nodeToVerify: Record<string, unknown> = { _: node._ }
-        for (const prop of propertiesWithoutTimestampSigs) {
-          nodeToVerify[prop] = node[prop]
-        }
-        const perPropertySignedProps = await SEA.verifyProperties(
-          nodeToVerify,
-          pub
-        )
-        perPropertySignedProps.forEach(prop => signedProperties.add(prop))
       }
 
       if (signedProperties.size === 0) {
@@ -212,13 +193,8 @@ Ham.mix = async (
         }
         defer[soul]![key] = value
         defer[soul]!._[">"][key] = state
-        if (node._["s"]) {
-          const sigs = node._["s"]
-          if (sigs[state]) {
-            defer[soul]!._["s"]![state] = sigs[state]
-          } else if (sigs[key]) {
-            defer[soul]!._["s"]![key] = sigs[key]
-          }
+        if (node._["s"] && node._["s"][state]) {
+          defer[soul]!._["s"]![state] = node._["s"][state]
         }
       } else {
         const isSigned =
@@ -237,13 +213,8 @@ Ham.mix = async (
           }
           graph[soul]![key] = now[soul]![key] = value
           graph[soul]!._[">"][key] = now[soul]!._[">"][key] = state
-          if (node._["s"]) {
-            const sigs = node._["s"]
-            if (sigs[state]) {
-              graph[soul]!._["s"]![state] = now[soul]!._["s"]![state] = sigs[state]
-            } else if (sigs[key]) {
-              graph[soul]!._["s"]![key] = now[soul]!._["s"]![key] = sigs[key]
-            }
+          if (node._["s"] && node._["s"][state]) {
+            graph[soul]!._["s"]![state] = now[soul]!._["s"]![state] = node._["s"][state]
           }
 
           if (listen[soul]) {

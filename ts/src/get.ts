@@ -39,13 +39,9 @@ const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
     node[key] = graph[soul]![key]
     node._[">"][key] = graph[soul]!._[">"][key]!
     const state = graph[soul]!._[">"][key]!
-    if (graph[soul]!._["s"]) {
-      const sigs = graph[soul]!._["s"]!
-      if (sigs[state]) {
-        signatures[state.toString()] = sigs[state]!
-      } else if (sigs[key]) {
-        signatures[key] = sigs[key]!
-      }
+    const sigs = graph[soul]!._["s"]
+    if (sigs && sigs[state]) {
+      signatures[state.toString()] = sigs[state]!
     }
 
     // Always include userPublicKey for verification, regardless of filter
@@ -53,13 +49,9 @@ const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
       node[userPublicKey] = graph[soul]![userPublicKey]
       node._[">"][userPublicKey] = graph[soul]!._[">"][userPublicKey]!
       const pkState = graph[soul]!._[">"][userPublicKey]!
-      if (graph[soul]!._["s"]) {
-        const sigs = graph[soul]!._["s"]!
-        if (sigs[pkState]) {
-          signatures[pkState.toString()] = sigs[pkState]!
-        } else if (sigs[userPublicKey]) {
-          signatures[userPublicKey] = sigs[userPublicKey]!
-        }
+      const pkSigs = graph[soul]!._["s"]
+      if (pkSigs && pkSigs[pkState]) {
+        signatures[pkState.toString()] = pkSigs[pkState]!
       }
     }
   } else {
@@ -73,13 +65,9 @@ const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
         node[key] = graph[soul]![key]!
         node._[">"][key] = graph[soul]!._[">"][key]!
         const state = graph[soul]!._[">"][key]!
-        if (graph[soul]!._["s"]) {
-          const sigs = graph[soul]!._["s"]!
-          if (sigs[state]) {
-            signatures[state.toString()] = sigs[state]!
-          } else if (sigs[key]) {
-            signatures[key] = sigs[key]!
-          }
+        const sigs = graph[soul]!._["s"]
+        if (sigs && sigs[state]) {
+          signatures[state.toString()] = sigs[state]!
         }
       }
     }

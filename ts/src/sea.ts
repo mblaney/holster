@@ -306,68 +306,6 @@ const SEA = {
   },
 
   /**
-   * Verify individual property signatures stored in node._["s"]
-   * Returns array of valid property names
-   */
-  verifyProperties: async (
-    node: Record<string, unknown>,
-    pub: string,
-    cb?: Callback<string[]>
-  ): Promise<string[]> => {
-    if (!pub || !node) {
-      if (cb) cb([])
-      return []
-    }
-
-    const key = await utils.subtle.importKey(
-      "jwk",
-      utils.jwk(pub),
-      { name: "ECDSA", namedCurve: "P-256" },
-      false,
-      ["verify"]
-    )
-
-    const alg = { name: "ECDSA", hash: { name: "SHA-256" } }
-    const valid: string[] = []
-    const propertySignatures =
-      ((node._ as Record<string, unknown> | undefined)?.["s"] as Record<string, string> | undefined) || {}
-
-    // Verify each property individually
-    for (const k of Object.keys(node).sort()) {
-      if (k === "_" || k === userPublicKey) continue
-
-      const propSig = propertySignatures[k]
-      if (!propSig) {
-        continue
-      }
-
-      try {
-        const hash = await utils.sha256(node[k])
-        const sig = new Uint8Array(SafeBuffer.from(propSig, "base64"))
-
-        const isValid = await utils.subtle.verify(
-          alg,
-          key,
-          sig,
-          new Uint8Array(hash)
-        )
-        if (isValid) {
-          valid.push(k)
-        } else {
-          console.log(`warning: property '${k}' signature verification failed`)
-        }
-      } catch (err) {
-        console.log(
-          `warning: property '${k}' error verifying: ${(err as Error).message}`
-        )
-      }
-    }
-
-    if (cb) cb(valid)
-    return valid
-  },
-
-  /**
    * Key derivation using PBKDF2
    */
   work: async (

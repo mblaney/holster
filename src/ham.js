@@ -102,21 +102,21 @@ Ham.mix = async (change, graph, secure, listen) => {
       for (const [key, sig] of Object.entries(node._["s"] || {})) {
         const asNumber = Number(key)
         if (!isNaN(asNumber) && asNumber > 0) {
-          // Check if this timestamp is for properties that already have newer
-          // versions in graph.
-          const hasNewerInGraph = incomingTimestamps.some(([prop, ts]) => {
-            if (Number(ts) === asNumber) {
+          // Skip verification only if ALL properties for this timestamp are
+          // already newer in the graph. Using some() would incorrectly skip
+          // valid updates when only one property in a batch is outdated.
+          const propsForTimestamp = incomingTimestamps.filter(
+            ([, ts]) => Number(ts) === asNumber,
+          )
+          const allNewerInGraph =
+            propsForTimestamp.length > 0 &&
+            propsForTimestamp.every(([prop]) => {
               const graphState =
                 graph[soul] && graph[soul]._[">"] ? graph[soul]._[">"][prop] : 0
-              // Skip verification if graph has a newer timestamp for property.
-              if (graphState > asNumber) {
-                return true
-              }
-            }
-            return false
-          })
+              return graphState > asNumber
+            })
 
-          if (hasNewerInGraph) {
+          if (allNewerInGraph) {
             continue
           }
 
@@ -131,28 +131,6 @@ Ham.mix = async (change, graph, secure, listen) => {
             }
           }
         }
-      }
-
-      // TODO: Remove per-property signature verification after old data has
-      // been cleared. Only check per-property signatures if there are
-      // properties without timestamp signatures.
-      const propertiesWithoutTimestampSigs = Object.keys(node).filter(k => {
-        if (k === "_" || k === utils.userPublicKey) return false
-        return !incomingTimestamps.some(
-          ([prop, ts]) => prop === k && signedTimestamps.has(Number(ts)),
-        )
-      })
-
-      if (propertiesWithoutTimestampSigs.length > 0) {
-        const nodeToVerify = {_: node._}
-        for (const prop of propertiesWithoutTimestampSigs) {
-          nodeToVerify[prop] = node[prop]
-        }
-        const perPropertySignedProps = await SEA.verifyProperties(
-          nodeToVerify,
-          pub,
-        )
-        perPropertySignedProps.forEach(prop => signedProperties.add(prop))
       }
 
       // If no properties verified, skip this update
@@ -196,12 +174,8 @@ Ham.mix = async (change, graph, secure, listen) => {
         }
         defer[soul][key] = value
         defer[soul]._[">"][key] = state
-        if (node._["s"]) {
-          if (node._["s"][state]) {
-            defer[soul]._["s"][state] = node._["s"][state]
-          } else if (node._["s"][key]) {
-            defer[soul]._["s"][key] = node._["s"][key]
-          }
+        if (node._["s"] && node._["s"][state]) {
+          defer[soul]._["s"][state] = node._["s"][state]
         }
       } else {
         // Check if this property has a signed timestamp
@@ -217,13 +191,9 @@ Ham.mix = async (change, graph, secure, listen) => {
           }
           graph[soul][key] = now[soul][key] = value
           graph[soul]._[">"][key] = now[soul]._[">"][key] = state
-          if (node._["s"]) {
-            if (node._["s"][state]) {
-              graph[soul]._["s"][state] = now[soul]._["s"][state] =
-                node._["s"][state]
-            } else if (node._["s"][key]) {
-              graph[soul]._["s"][key] = now[soul]._["s"][key] = node._["s"][key]
-            }
+          if (node._["s"] && node._["s"][state]) {
+            graph[soul]._["s"][state] = now[soul]._["s"][state] =
+              node._["s"][state]
           }
           // Collect event listeners to fire after store.put completes.
           // This ensures listeners always fire with data that's been stored.

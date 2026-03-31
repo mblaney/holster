@@ -25,12 +25,8 @@ const Get = (lex, graph, fast) => {
     node[key] = graph[soul][key]
     node._[">"][key] = graph[soul]._[">"][key]
     const state = graph[soul]._[">"][key]
-    if (graph[soul]._["s"]) {
-      if (graph[soul]._["s"][state]) {
-        signatures[state] = graph[soul]._["s"][state]
-      } else if (graph[soul]._["s"][key]) {
-        signatures[key] = graph[soul]._["s"][key]
-      }
+    if (graph[soul]._["s"] && graph[soul]._["s"][state]) {
+      signatures[state] = graph[soul]._["s"][state]
     }
 
     // Always include userPublicKey for verification, regardless of filter
@@ -38,12 +34,8 @@ const Get = (lex, graph, fast) => {
       node[userPublicKey] = graph[soul][userPublicKey]
       node._[">"][userPublicKey] = graph[soul]._[">"][userPublicKey]
       const pkState = graph[soul]._[">"][userPublicKey]
-      if (graph[soul]._["s"]) {
-        if (graph[soul]._["s"][pkState]) {
-          signatures[pkState] = graph[soul]._["s"][pkState]
-        } else if (graph[soul]._["s"][userPublicKey]) {
-          signatures[userPublicKey] = graph[soul]._["s"][userPublicKey]
-        }
+      if (graph[soul]._["s"] && graph[soul]._["s"][pkState]) {
+        signatures[pkState] = graph[soul]._["s"][pkState]
       }
     }
   } else {
@@ -57,12 +49,8 @@ const Get = (lex, graph, fast) => {
         node[key] = graph[soul][key]
         node._[">"][key] = graph[soul]._[">"][key]
         const state = graph[soul]._[">"][key]
-        if (graph[soul]._["s"]) {
-          if (graph[soul]._["s"][state]) {
-            signatures[state] = graph[soul]._["s"][state]
-          } else if (graph[soul]._["s"][key]) {
-            signatures[key] = graph[soul]._["s"][key]
-          }
+        if (graph[soul]._["s"] && graph[soul]._["s"][state]) {
+          signatures[state] = graph[soul]._["s"][state]
         }
       }
     }
