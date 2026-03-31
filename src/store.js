@@ -112,6 +112,7 @@ const fileSystem = opt => {
           const req = tx.objectStore(dir).get(file)
           req.onerror = () => {
             console.log(`error getting ${dir}/${file}`)
+            cb(req.error)
           }
           req.onsuccess = () => {
             cb(null, req.result)
@@ -132,6 +133,7 @@ const fileSystem = opt => {
           const req = tx.objectStore(dir).put(data, file)
           req.onerror = () => {
             console.log(`error putting data on ${dir}/${file}`)
+            cb(req.error)
           }
           req.onsuccess = () => {
             cb(null)
@@ -150,7 +152,10 @@ const fileSystem = opt => {
         const _list = cb => {
           const tx = db.transaction([dir], "readonly")
           const req = tx.objectStore(dir).getAllKeys()
-          req.onerror = () => console.log("error getting keys for", dir)
+          req.onerror = () => {
+            console.log("error getting keys for", dir)
+            cb()
+          }
           req.onsuccess = () => {
             req.result.forEach(cb)
             cb()
@@ -217,12 +222,7 @@ const Store = opt => {
         node._[">"][key] = value[1]
         // If signature is present, store it in _["s"]
         if (value.length === 3 && value[2]) {
-          const state = value[1]
-          // Store signature under both state and key for compatibility
-          signatures[state] = value[2]
-          // TODO: Can probably remove the following when old data is no
-          // longer a problem.
-          signatures[key] = value[2]
+          signatures[value[1]] = value[2]
         }
       }
 

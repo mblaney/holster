@@ -367,12 +367,18 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       lex,
       (err, ack) => {
         if (ack) {
+          // Populate in-memory graph from store data before sending the server
+          // request, so stale server responses with older state are correctly
+          // rejected by ham.mix.
+          for (const [soul, node] of Object.entries(ack)) {
+            if (!graph[soul] && node) graph[soul] = {...node} as unknown as Graph[string]
+          }
           const sendResult = send(request)
           if (sendResult && sendResult.err) {
             cb({ err: sendResult.err })
             return
           }
-          cb({ put: ack, err: err || undefined })
+          cb(err ? { put: ack, err: err } : { put: ack })
           return
         }
 

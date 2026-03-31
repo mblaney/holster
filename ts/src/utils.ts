@@ -64,7 +64,7 @@ export const obj = {
   /**
    * Set a property on an object
    */
-  put: <T>(o: Record<string, T> | undefined, key: string, value: T): Record<string, T> => {
+  put: (o: Record<string, unknown> | undefined, key: string, value: unknown): Record<string, unknown> => {
     const target = o || {}
     target[key] = value
     return target
@@ -125,7 +125,7 @@ export const rel = {
   /**
    * Convert a soul into a relation and return it
    */
-  ify: (soul: Soul): Relation => obj.put<string>({}, "#", soul) as Relation,
+  ify: (soul: Soul): Relation => obj.put({}, "#", soul) as Relation,
 }
 
 // ============================================================================
