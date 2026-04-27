@@ -10,7 +10,6 @@ describe("system - user chained get with on", () => {
   const holster: HolsterAPI = Holster({
     file: "test/system/user-chained-on",
     wss: wss,
-    wait: 500,
   })
   const user = holster.user()
 

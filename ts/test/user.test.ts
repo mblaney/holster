@@ -7,7 +7,7 @@ import type { UserInterface } from "../src/schemas.ts"
 
 describe("user", () => {
   const wss: Server = new Server("ws://localhost:1234")
-  const user: UserInterface = User({ file: "test/user", wss: wss, maxAge: 100, wait: 500 } as any)
+  const user: UserInterface = User({ file: "test/user", wss: wss } as any)
 
   test("create", (t, done) => {
     user.create("alice", "password", err => {

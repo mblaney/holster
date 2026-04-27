@@ -67,6 +67,7 @@ const Ham = (
 Ham.mix = async (
   change: Graph,
   graph: Graph,
+  hasNode: Set<string> | undefined,
   secure: boolean,
   listen: ListenMap
 ): Promise<HamMixResult> => {
@@ -244,7 +245,10 @@ Ham.mix = async (
       })
       .sort((a, b) => a.maxState - b.maxState)
     const remove = soulsByAge.slice(0, souls.length - MAX_GRAPH_SIZE)
-    remove.forEach(({ soul }) => delete graph[soul])
+    remove.forEach(({ soul }) => {
+      delete graph[soul]
+      if (hasNode) hasNode.delete(soul)
+    })
   }
 
   return { now, defer, wait, listeners }

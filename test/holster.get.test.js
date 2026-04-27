@@ -6,7 +6,7 @@ import Holster from "../src/holster.js"
 
 describe("holster.get", () => {
   const wss = new Server("ws://localhost:1234")
-  const holster = Holster({file: "test/holster.get", wss: wss, maxAge: 100})
+  const holster = Holster({file: "test/holster.get", wss: wss})
 
   test("empty key callback null", (t, done) => {
     holster.get("", data => {

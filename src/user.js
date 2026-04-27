@@ -5,7 +5,6 @@ import {userPublicKey, userSignature} from "./utils.js"
 
 const User = (opt, wire) => {
   if (!wire) wire = Wire(opt)
-  const wait = opt?.wait ?? 5000
   let pubs = []
   let creating = false
   let authing = false
@@ -76,7 +75,6 @@ const User = (opt, wire) => {
 
           done(null)
         },
-        {wait: wait},
       )
     }
 
@@ -103,7 +101,6 @@ const User = (opt, wire) => {
         pubs = Object.keys(data)
         next()
       },
-      {wait: wait},
     )
   }
 
@@ -183,7 +180,6 @@ const User = (opt, wire) => {
             })
           })
         },
-        {wait: wait},
       )
     },
     auth: (username, password, cb) => {

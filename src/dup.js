@@ -1,6 +1,5 @@
-const Dup = maxAge => {
-  // Allow maxAge to be passed in as tests wait on the setTimeout.
-  if (!maxAge) maxAge = 9000
+const Dup = () => {
+  const maxAge = 9000
   const dup = {store: {}}
   dup.check = id => (dup.store[id] ? dup.track(id) : false)
   dup.track = id => {
@@ -8,14 +7,14 @@ const Dup = maxAge => {
     dup.store[id] = Date.now()
     if (!dup.expiry) {
       dup.expiry = setTimeout(() => {
-        if (dup.expiry) return
-
         const now = Date.now()
         Object.keys(dup.store).forEach(id => {
           if (now - dup.store[id] > maxAge) delete dup.store[id]
         })
         dup.expiry = null
       }, maxAge)
+      // Don't block process exit — cleanup is best-effort.
+      if (dup.expiry.unref) dup.expiry.unref()
     }
     return id
   }

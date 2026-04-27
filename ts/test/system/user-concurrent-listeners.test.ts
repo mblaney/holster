@@ -10,7 +10,6 @@ describe("system - user concurrent listeners", () => {
   const holster: HolsterAPI = Holster({
     file: "test/system/user-concurrent-listeners",
     wss: wss,
-    wait: 500,
   })
   const user = holster.user()
 

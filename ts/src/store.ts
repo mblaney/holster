@@ -15,7 +15,7 @@ import type {
   EncodedValue,
 } from "./schemas.ts"
 
-const isNode = typeof document === "undefined"
+const isNode = typeof process !== "undefined" && process.versions?.node != null
 
 // Dynamic import for Node.js fs module - won't execute in browser/service worker
 const fs = isNode

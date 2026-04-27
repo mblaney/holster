@@ -175,9 +175,7 @@ describe("radisk with cache", () => {
     })
   })
 
-  test.skip("add to last file with cache", (t, done) => {
-    // Skip: This test exercises a complex edge case in file splitting
-    // that behaves differently with caching enabled
+  test("add to last file with cache", (t, done) => {
     radisk("smallContinued", "continued value")
     setTimeout(() => {
       radisk("smallContinued", (err, value) => {

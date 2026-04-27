@@ -2,7 +2,7 @@ import Radisk from "./radisk.js"
 import Radix from "./radix.js"
 import * as utils from "./utils.js"
 
-const isNode = typeof document === "undefined"
+const isNode = typeof process !== "undefined" && process.versions?.node != null
 const fs = isNode ? await import(/*webpackIgnore: true*/ "node:fs") : undefined
 
 // ASCII character for enquiry.

@@ -9,7 +9,6 @@ describe("holster.secure", () => {
   const holster = Holster({
     file: "test/holster.secure",
     wss: wss,
-    maxAge: 100,
     secure: true,
   })
   const user = holster.user()

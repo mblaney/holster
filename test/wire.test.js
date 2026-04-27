@@ -7,12 +7,77 @@ import Wire from "../src/wire.js"
 describe("wire", () => {
   // Need different websocket servers otherwise data on file will sync up.
   const wss1 = new Server("ws://localhost:1234")
-  const kitty = Wire({file: "test/kitty", wss: wss1, maxAge: 10})
+  const kitty = Wire({file: "test/kitty", wss: wss1})
 
   const wss2 = new Server("ws://localhost:1235")
-  const wire = Wire({file: "test/wire", wss: wss2, maxAge: 10})
+  const wire = Wire({file: "test/wire", wss: wss2})
 
   const ws = new WebSocket("ws://localhost:1235")
+
+  const wss3 = new Server("ws://localhost:1236")
+  const batchWire = Wire({file: "test/batch-wire", wss: wss3})
+
+  const wss4 = new Server("ws://localhost:1237")
+  const secureWire = Wire({file: "test/secure-wire", wss: wss4})
+
+  // ws3 responds to a get for "batch_parent" with a put batch where
+  // "batch_child" appears before "batch_parent" to exercise the pre-pass.
+  // All other gets (e.g. check() public key lookups) receive an empty ack so
+  // that check() completes before the 100ms timeout and processMessage fires
+  // the queue callback with the full batch data.
+  let ackId = 0
+  const ws3 = new WebSocket("ws://localhost:1236")
+  ws3.onmessage = m => {
+    const msg = JSON.parse(m.data)
+    if (!msg.get) return
+    if (msg.get["#"] === "batch_parent" && !msg.get["."]) {
+      ws3.send(
+        JSON.stringify({
+          "#": "batch_response",
+          "@": msg["#"],
+          put: {
+            "batch_child": {
+              _: {"#": "batch_child", ">": {data: 1}},
+              data: "child value",
+            },
+            "batch_parent": {
+              _: {"#": "batch_parent", ">": {child: 1}},
+              child: {"#": "batch_child"},
+            },
+          },
+        }),
+      )
+    } else {
+      ws3.send(
+        JSON.stringify({"#": `ack_${++ackId}`, "@": msg["#"], put: null}),
+      )
+    }
+  }
+  let ackId4 = 0
+  const ws4 = new WebSocket("ws://localhost:1237")
+  ws4.onmessage = m => {
+    const msg = JSON.parse(m.data)
+    if (!msg.get) return
+    if (msg.get["#"] === "secure_test_soul" && msg.get["."] === "missing_prop") {
+      ws4.send(
+        JSON.stringify({
+          "#": "secure_prop_ack",
+          "@": msg["#"],
+          put: {
+            "secure_test_soul": {
+              _: {"#": "secure_test_soul", ">": {"missing_prop": 3}},
+              "missing_prop": "found_on_wire",
+            },
+          },
+        }),
+      )
+    } else {
+      ws4.send(
+        JSON.stringify({"#": `ack4_${++ackId4}`, "@": msg["#"], put: null}),
+      )
+    }
+  }
+
   ws.onmessage = m => {
     const msg = JSON.parse(m.data)
     if (msg.get) {
@@ -116,6 +181,14 @@ describe("wire", () => {
     })
   })
 
+  test("child soul before parent in batch gets stored", (t, done) => {
+    batchWire.get({"#": "batch_parent"}, msg => {
+      assert.ok(msg.put?.["batch_child"])
+      assert.equal(msg.put["batch_child"].data, "child value")
+      done()
+    })
+  })
+
   test("put and get new node", (t, done) => {
     const update = {
       key: {
@@ -144,12 +217,44 @@ describe("wire", () => {
     })
   })
 
+  test("secure full-node store fetch does not mask missing property", (t, done) => {
+    const pubKey = "_holster_user_public_key"
+    secureWire.put(
+      {
+        "secure_test_soul": {
+          _: {"#": "secure_test_soul", ">": {[pubKey]: 1}},
+          [pubKey]: "testpubkey",
+        },
+      },
+      err => {
+        assert.equal(err, null)
+        secureWire.get(
+          {"#": "secure_test_soul", ".": "missing_prop"},
+          msg => {
+            assert.equal(
+              msg.put?.["secure_test_soul"]?.["missing_prop"],
+              "found_on_wire",
+            )
+            done()
+          },
+          {secure: true},
+        )
+      },
+    )
+  })
+
   test("cleanup", (t, done) => {
     // Timeout to let extra wire sends finish before tests end.
     setTimeout(() => {
       fs.rm("test/wire", {recursive: true, force: true}, err => {
         assert.equal(err, null)
-        done()
+        fs.rm("test/batch-wire", {recursive: true, force: true}, err => {
+          assert.equal(err, null)
+          fs.rm("test/secure-wire", {recursive: true, force: true}, err => {
+            assert.equal(err, null)
+            done()
+          })
+        })
       })
     }, 100)
   })

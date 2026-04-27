@@ -10,6 +10,7 @@ import Store from "./store.ts"
 import * as utils from "./utils.ts"
 import type {
   Graph,
+  GraphNode,
   WireMessage,
   WireOptions,
   Lex,
@@ -25,7 +26,7 @@ type UnifiedWebSocket = WebSocket & {
   send: (data: string | Buffer | ArrayBuffer | Uint8Array, options?: unknown, cb?: (err?: Error) => void) => void
 }
 
-const isNode = typeof document === "undefined"
+const isNode = typeof process !== "undefined" && process.versions?.node != null
 
 // Dynamic import for Node.js ws module - won't execute in browser/service worker
 const wsModule = isNode ? await import("ws") : undefined
@@ -219,17 +220,22 @@ export interface WireAPI {
 
 const Wire = (opt: HolsterOptions): WireAPI => {
   const options = opt || {}
-  const dup = Dup(options.maxAge)
+  const dup = Dup()
   const store = Store(options as never)
   const graph: Graph = {}
   const queue: Record<string, (msg: WireMessage) => void> = {}
   const listen: ListenMap = {}
 
   const pendingReferences = new Set<string>()
-  const pendingTimeouts = new Map<
-    string,
-    { lex: Lex; wait: number; timeoutId?: NodeJS.Timeout }
-  >()
+  const hasNode = new Set<string>()
+
+  // Debounce client-side wire update checks: skip if the same lex was checked
+  // recently. Keyed by "soul" or "soul.property".
+  const recentChecks = new Map<string, number>()
+  const recentCheckTTL = 10000 // 10 seconds
+
+  const pendingTimeouts = new Map<string, Lex>()
+  const offlineTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
   const hasSoul = async (soul: string): Promise<boolean> => {
     if (graph[soul]) return true
@@ -252,19 +258,26 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     const key = utils.userPublicKey
 
     for (const soul of Object.keys(data)) {
+      const node = data[soul]!
+      // If the incoming update doesn't include a userPublicKey property at all,
+      // allow it - the update is not trying to change the public key.
+      if (node[key] === undefined) continue
+
       const msg = await new Promise<WireMessage>(res => {
-        getWithCallback({ "#": soul, ".": key }, res, send)
+        getWithCallback({ "#": soul, ".": key }, res, send, {put: true})
       })
       if (msg.err) {
         if (cb) cb(msg.err)
         return false
       }
 
-      const node = data[soul]!
+      // If there is no current node then the data is ok to write without
+      // matching public keys, as the provided soul also needs a rel on the
+      // parent node which then also requires checking. Otherwise public keys
+      // need to match for existing data.
       if (
         !msg.put ||
         !msg.put[soul] ||
-        node[key] === undefined ||
         msg.put[soul]![key] === node[key]
       ) {
         continue
@@ -311,7 +324,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     msg: { put: Graph; "#": string },
     send: (msg: string) => void
   ): Promise<void> => {
-    const update = await Ham.mix(msg.put, graph, options.secure || false, listen)
+    const update = await Ham.mix(msg.put, graph, hasNode, options.secure || false, listen)
     if (Object.keys(update.now).length === 0) {
       if (Object.keys(update.defer).length !== 0) {
         setTimeout(() => put({ put: update.defer, "#": msg["#"] }, send), update.wait)
@@ -322,6 +335,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     if (!(await check(update.now, send as never))) return
 
     store.put(update.now, err => {
+      if (err) console.warn("store.put", err)
       send(
         JSON.stringify({
           "#": dup.track(utils.text.random(9)),
@@ -346,7 +360,8 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     if (!cb) return
 
     const opts = _opt || {}
-    const ack = Get(lex, graph, opts.fast)
+    const fast = opts.fast || (!lex["."] && hasNode.has(lex["#"]))
+    const ack = Get(lex, graph, fast)
     const track = utils.text.random(9)
     const request = JSON.stringify({
       "#": dup.track(track),
@@ -354,10 +369,30 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     })
 
     if (ack) {
-      const sendResult = send(request)
-      if (sendResult && sendResult.err) {
-        cb({ err: sendResult.err })
-        return
+      if (!isNode) {
+        // Client: send request on the wire to check for updates,
+        // since it may have missed puts while disconnected.
+        // Skip if the same lex was checked recently to avoid flooding.
+        if (!lex["."] || typeof lex["."] === "string") {
+          const checkKey = lex["#"] + (lex["."] ? "." + lex["."] : "")
+          const now = Date.now()
+          const lastCheck = recentChecks.get(checkKey)
+          if (!lastCheck || now - lastCheck > recentCheckTTL) {
+            recentChecks.set(checkKey, now)
+            const sendResult = send(request)
+            if (sendResult && sendResult.err) {
+              cb({ err: sendResult.err })
+              return
+            }
+          }
+        } else {
+          // Don't skip checks for other types of lex queries.
+          const sendResult = send(request)
+          if (sendResult && sendResult.err) {
+            cb({ err: sendResult.err })
+            return
+          }
+        }
       }
       cb({ put: ack })
       return
@@ -371,25 +406,84 @@ const Wire = (opt: HolsterOptions): WireAPI => {
           // request, so stale server responses with older state are correctly
           // rejected by ham.mix.
           for (const [soul, node] of Object.entries(ack)) {
-            if (!graph[soul] && node) graph[soul] = {...node} as unknown as Graph[string]
+            if (!node) continue
+            if (!graph[soul]) {
+              graph[soul] = {...node} as unknown as Graph[string]
+              continue
+            }
+            for (const [key, value] of Object.entries(node)) {
+              if (key === "_") continue
+              const gNode = graph[soul] as unknown as Record<string, unknown>
+              if (typeof gNode[key] !== "undefined") continue
+              gNode[key] = value
+              const meta = (node as unknown as GraphNode)._
+              if (meta?.[">"] && typeof meta[">"][key] !== "undefined") {
+                const state = meta[">"][key]
+                const gMeta = (graph[soul] as unknown as GraphNode)._
+                gMeta[">"][key] = state
+                if (meta["s"]?.[state]) {
+                  if (!gMeta["s"]) gMeta["s"] = {}
+                  gMeta["s"]![state] = meta["s"][state]
+                }
+              }
+            }
           }
-          const sendResult = send(request)
-          if (sendResult && sendResult.err) {
-            cb({ err: sendResult.err })
+          // Full-node fetch: the graph is now complete for this soul.
+          if (!lex["."] && ack[lex["#"]]) hasNode.add(lex["#"])
+          // Only serve from store if the requested property is present.
+          const node = ack[lex["#"]]
+          const hasProperty =
+            node &&
+            Object.keys(node).some(
+              key => key !== "_" && utils.match(lex["."], key),
+            )
+          if (hasProperty) {
+            // Public keys are immutable once written — never need a wire check.
+            if (!isNode && lex["."] !== utils.userPublicKey) {
+              if (!lex["."] || typeof lex["."] === "string") {
+                const checkKey = lex["#"] + (lex["."] ? "." + lex["."] : "")
+                const now = Date.now()
+                const lastCheck = recentChecks.get(checkKey)
+                if (!lastCheck || now - lastCheck > recentCheckTTL) {
+                  recentChecks.set(checkKey, now)
+                  const sendResult = send(request)
+                  if (sendResult && sendResult.err) {
+                    cb({ err: sendResult.err })
+                    return
+                  }
+                }
+              } else {
+                const sendResult = send(request)
+                if (sendResult && sendResult.err) {
+                  cb({ err: sendResult.err })
+                  return
+                }
+              }
+            }
+            cb(err ? { put: ack, err: err } : { put: ack })
             return
           }
-          cb(err ? { put: ack, err: err } : { put: ack })
-          return
         }
 
         if (err) console.log(err)
 
+        // Put requests only need a local answer — skip the wire round-trip.
+        if (opts && opts.put) {
+          const id = lex["#"]
+          const ack: Record<string, null | Record<string, null>> = {[id]: null}
+          if (typeof lex["."] === "string") {
+            ack[id] = {[lex["."]]: null}
+          }
+          cb({put: ack as never})
+          return
+        }
+
         queue[track] = cb
 
-        pendingTimeouts.set(track, {
-          lex: lex,
-          wait: opts.wait || 100,
-        })
+        pendingTimeouts.set(track, lex)
+
+        // Ensure the requested soul is stored when the response arrives.
+        pendingReferences.add(lex["#"])
 
         const sendResult = send(request)
         if (sendResult && sendResult.err) {
@@ -415,7 +509,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         getWithCallback(lex, cb, send, _opt)
       },
       put: async (data, cb) => {
-        const update = await Ham.mix(data, graph, options.secure || false, listen)
+        const update = await Ham.mix(data, graph, hasNode, options.secure || false, listen)
         if (Object.keys(update.now).length === 0) {
           if (cb) cb(null)
           return
@@ -482,14 +576,14 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     }
   }
 
-  if (isNode) {
+  if (isNode && (options.wss || options.server || options.port != null)) {
     let wss = options.wss
     let clients = (): WebSocket[] =>
       (wss as { clients?: () => WebSocket[] }).clients?.() || []
     if (!wss) {
       const config = options.server
         ? { server: options.server }
-        : { port: options.port || 8765 }
+        : { port: options.port }
       wss = new wsModule!.WebSocketServer(config)
       clients = () => Array.from((wss as { clients: Set<WebSocket> }).clients || [])
     }
@@ -498,21 +592,21 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       const msg = JSON.parse(data) as WireMessage
       const trackId = msg["#"]
       if (trackId && pendingTimeouts.has(trackId)) {
-        const timeoutConfig = pendingTimeouts.get(trackId)!
+        const lex = pendingTimeouts.get(trackId)!
         pendingTimeouts.delete(trackId)
 
-        timeoutConfig.timeoutId = setTimeout(() => {
+        setTimeout(() => {
           const cb = queue[trackId]
           if (cb) {
-            const id = timeoutConfig.lex["#"]
+            const id = lex["#"]
             const ack: Graph = { [id]: null as never }
-            if (typeof timeoutConfig.lex["."] === "string") {
-              ack[id] = { [timeoutConfig.lex["."]]: null } as never
+            if (typeof lex["."] === "string") {
+              ack[id] = { [lex["."]]: null } as never
             }
             cb({ "#": trackId, put: ack })
             delete queue[trackId]
           }
-        }, timeoutConfig.wait)
+        }, isTestEnv ? 100 : 10000)
       }
 
       clients().forEach(client => {
@@ -643,6 +737,23 @@ const Wire = (opt: HolsterOptions): WireAPI => {
   let queueProcessor: NodeJS.Timeout | null = null
   const maxQueueLength = options.maxQueueLength || 10000
 
+  const startResponseTimeout = (trackId: string, lex: Lex, delay = isTestEnv ? 100 : 10000): ReturnType<typeof setTimeout> => {
+    return setTimeout(() => {
+      offlineTimeouts.delete(trackId)
+      pendingTimeouts.delete(trackId)
+      const cb = queue[trackId]
+      if (cb) {
+        const id = lex["#"]
+        const ack: Graph = { [id]: null as never }
+        if (typeof lex["."] === "string") {
+          ack[id] = { [lex["."]]: null } as never
+        }
+        cb({ "#": trackId, put: ack })
+        delete queue[trackId]
+      }
+    }, delay)
+  }
+
   const processQueue = (): void => {
     if (messageQueue.length === 0) {
       queueProcessor = null
@@ -664,27 +775,27 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     const data = messageQueue[0]!
     const sent = sendToPeers(data)
 
-    if (sent) {
+    const msg = JSON.parse(data) as WireMessage
+    const trackId = msg["#"]
+
+    // Drop GET messages with no pending callback — these were already served
+    // from local store so no caller is waiting for the wire response.
+    const isStaleCheckMessage = !sent && !!msg.get && !pendingTimeouts.has(trackId!)
+
+    if (sent || isStaleCheckMessage) {
       messageQueue.shift()
+    }
 
-      const msg = JSON.parse(data) as WireMessage
-      const trackId = msg["#"]
-      if (trackId && pendingTimeouts.has(trackId)) {
-        const timeoutConfig = pendingTimeouts.get(trackId)!
-        pendingTimeouts.delete(trackId)
-
-        timeoutConfig.timeoutId = setTimeout(() => {
-          const cb = queue[trackId]
-          if (cb) {
-            const id = timeoutConfig.lex["#"]
-            const ack: Graph = { [id]: null as never }
-            if (typeof timeoutConfig.lex["."] === "string") {
-              ack[id] = { [timeoutConfig.lex["."]]: null } as never
-            }
-            cb({ "#": trackId, put: ack })
-            delete queue[trackId]
-          }
-        }, timeoutConfig.wait)
+    if (trackId && pendingTimeouts.has(trackId)) {
+      const lex = pendingTimeouts.get(trackId)!
+      if (sent) {
+        if (offlineTimeouts.has(trackId)) {
+          clearTimeout(offlineTimeouts.get(trackId)!)
+          offlineTimeouts.delete(trackId)
+        }
+        startResponseTimeout(trackId, lex)
+      } else if (!offlineTimeouts.has(trackId)) {
+        offlineTimeouts.set(trackId, startResponseTimeout(trackId, lex, 0))
       }
     }
 
@@ -781,32 +892,53 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         dup.track(msg["#"]!)
         if (msg.get) get(msg as never, send as never)
         if (msg.put) {
-          const filteredPut: Graph = {}
+          // Pre-pass: expand pendingReferences to include rels of every soul
+          // that will be stored in this batch. This handles the case where a
+          // server batch contains both a parent soul (e.g. day_soul with item
+          // rels) and its child souls (item_souls), in any order — without the
+          // pre-pass, a child soul that appears before its parent in the batch
+          // would be missed because pendingReferences hasn't been updated yet.
+          const hasSoulMap = new Map<string, boolean>()
           for (const [soul, node] of Object.entries(msg.put)) {
-            let shouldStore = false
-            if (await hasSoul(soul)) {
-              shouldStore = true
-              if (node && typeof node === "object") {
-                for (const [_key, value] of Object.entries(node)) {
-                  const soulId = utils.rel.is(value as GraphValue)
-                  if (soulId) {
-                    pendingReferences.add(soulId)
-                  }
-                }
-              }
-            }
-            if (pendingReferences.has(soul)) {
-              shouldStore = true
-              pendingReferences.delete(soul)
-            }
-            if (shouldStore) {
-              filteredPut[soul] = node
+            const known = await hasSoul(soul)
+            hasSoulMap.set(soul, known)
+            if ((!known && !pendingReferences.has(soul)) || !node || typeof node !== "object") continue
+            for (const [, value] of Object.entries(node)) {
+              const soulId = utils.rel.is(value as GraphValue)
+              if (soulId) pendingReferences.add(soulId)
             }
           }
+
+          // Main pass: filter using cached hasSoul results and the now-complete
+          // pendingReferences set.
+          const filteredPut: Graph = {}
+          const pendingToDelete: string[] = []
+          for (const [soul, node] of Object.entries(msg.put)) {
+            let shouldStore = hasSoulMap.get(soul)
+            if (pendingReferences.has(soul)) {
+              shouldStore = true
+              // Don't delete from pendingReferences yet — concurrent onmessage
+              // handlers for the same soul may have yielded at await hasSoul()
+              // before this pass ran. Deleting here would cause those handlers
+              // to see shouldStore=false and skip storing the soul's data.
+              // Instead, defer the delete until after put() updates the graph,
+              // so any concurrent handler can find the soul via hasSoul(graph).
+              pendingToDelete.push(soul)
+            }
+            if (shouldStore) filteredPut[soul] = node
+          }
+
+          // Store filtered data if any
           if (Object.keys(filteredPut).length > 0) {
+            // Create filtered message for Ham.mix with original message ID
             const filteredMsg = { put: filteredPut, "#": msg["#"]! }
             await put(filteredMsg, send as never)
           }
+
+          // Safe to delete now — put() has run Ham.mix which updates graph
+          // in-place, so hasSoul() will return true for these souls going
+          // forward, making pendingReferences no longer needed for them.
+          pendingToDelete.forEach(soul => pendingReferences.delete(soul))
         }
 
         const id = msg["@"]
