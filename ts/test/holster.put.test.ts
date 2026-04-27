@@ -7,7 +7,7 @@ import type { HolsterAPI } from "../src/holster.ts"
 
 describe("holster.put", () => {
   const wss: Server = new Server("ws://localhost:1234")
-  const holster: HolsterAPI = Holster({file: "test/holster.put", wss: wss, maxAge: 100})
+  const holster: HolsterAPI = Holster({file: "test/holster.put", wss: wss})
 
   test("put and get string on root", (t, done) => {
     holster.get("key").put("value", err => {

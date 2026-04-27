@@ -43,17 +43,20 @@ const Get = (lex, graph, fast) => {
     // return undefined to ensure we get all matching properties from store.
     if (!fast) return
 
+    let found = false
     for (const key of Object.keys(graph[soul])) {
       // Always include userPublicKey for verification, regardless of filter
-      if (key === userPublicKey || match(lex["."], key)) {
+      if (key !== "_" && (key === userPublicKey || match(lex["."], key))) {
         node[key] = graph[soul][key]
         node._[">"][key] = graph[soul]._[">"][key]
         const state = graph[soul]._[">"][key]
         if (graph[soul]._["s"] && graph[soul]._["s"][state]) {
           signatures[state] = graph[soul]._["s"][state]
         }
+        found = true
       }
     }
+    if (!found) return
   }
   if (Object.keys(signatures).length > 0) {
     node._["s"] = signatures

@@ -34,7 +34,6 @@ const Radisk = opt => {
   if (!opt.write) opt.write = 1 // Wait time before write in milliseconds
   if (!opt.size) opt.size = 1024 * 1024 // File size on disk, default 1MB
   if (!opt.memoryLimit) opt.memoryLimit = 500 // Memory limit in MB
-  if (!opt.readTimeout) opt.readTimeout = 1000 // Read timeout in milliseconds
   if (typeof opt.cache === "undefined") opt.cache = true
 
   if (!opt.store) {
@@ -124,37 +123,29 @@ const Radisk = opt => {
         }
       }
 
-      // Check if there's already a pending read for this key
       if (pendingReads.has(key)) {
-        // Add callback to existing pending read
-        pendingReads.get(key).callbacks.push(cb)
+        pendingReads.get(key).push(cb)
         return
       }
 
-      // Start new read and create callback queue with fired flag
-      const pending = {callbacks: [cb], fired: false, timeoutId: null}
-      pendingReads.set(key, pending)
-
-      // Set a timeout to fire callbacks if read takes too long
-      pending.timeoutId = setTimeout(() => {
-        if (!pending.fired) {
-          pending.fired = true
-          pendingReads.delete(key)
-          const err = new Error("radisk read timeout")
-          pending.callbacks.forEach(callback => callback(err, undefined))
-        }
-      }, opt.readTimeout)
-
+      pendingReads.set(key, [cb])
       const readStart = Date.now()
+      // If radisk.read genuinely hangs (fd leak, stuck I/O), recover
+      // callbacks as a cache miss so callers can fall through to the wire path.
+      // 30s is long enough to distinguish a hang from a slow-but-healthy read.
+      const timeout = setTimeout(() => {
+        const callbacks = pendingReads.get(key)
+        if (!callbacks) return
+        opt.log(`radisk read hang detected for key: ${key}`)
+        pendingReads.delete(key)
+        callbacks.forEach(callback => callback(null, null))
+      }, 30000)
       return radisk.read(key, (err, result) => {
-        clearTimeout(pending.timeoutId)
+        clearTimeout(timeout)
         perfLog("read", readStart, key)
-        // Execute all pending callbacks for this key if timeout hasn't fired
-        if (!pending.fired) {
-          pending.fired = true
-          pendingReads.delete(key)
-          pending.callbacks.forEach(callback => callback(err, result))
-        }
+        const callbacks = pendingReads.get(key) || []
+        pendingReads.delete(key)
+        callbacks.forEach(callback => callback(err, result))
       })
     }
 
@@ -288,6 +279,8 @@ const Radisk = opt => {
       limit: "",
       done: false,
       count: 0,
+      halfKey: "",   // soul ID at the ~opt.size/2 mark for a balanced split
+      halfOffset: 0, // write.text.length before that entry
       each: (value, key, k, pre) => {
         // each is called for all keys, but stop adding to write.text when
         // write.slice is called, then the current contents of write.text
@@ -298,17 +291,46 @@ const Radisk = opt => {
         value = typeof value === "undefined" ? "" : "=" + Radisk.encode(value)
         const enc =
           Radisk.encode(pre.length) + "#" + Radisk.encode(k) + value + "\n"
-        // Cannot split the file if only have one entry to write. Also don't
-        // start a split if in the middle of writing a node (pre > 0).
+        // Cannot split the file if only have one entry to write. Allow splitting
+        // at depth > 0 only when k itself contains enq, meaning k is a full
+        // "soulId\x05property" key, not merely a property suffix of a shared
+        // soul prefix. Use the full key (pre + k) to extract the soul boundary.
+        const validBoundary =
+          pre.length === 0 || (pre.length === 1 && k.includes(enq))
+
+        // Record the first valid split boundary past the halfway mark so a
+        // full overflow can split here instead of at the tail, keeping both
+        // halves near opt.size/2 rather than leaving the file always full.
+        if (
+          !write.halfKey &&
+          write.count > 1 &&
+          write.text.length > opt.size / 2 &&
+          validBoundary
+        ) {
+          const fullKey = pre.join("") + k
+          const end = fullKey.indexOf(enq)
+          write.halfKey =
+            end === -1 ? fullKey : fullKey.substring(0, end)
+          write.halfOffset = write.text.length
+        }
+
         if (
           write.count > 1 &&
-          pre.length === 0 &&
-          write.text.length + enc.length > opt.size
+          write.text.length + enc.length > opt.size &&
+          validBoundary
         ) {
-          const end = k.indexOf(enq)
-          write.limit = end === -1 ? k : k.substring(0, end)
-          // Cannot split if they key is the same as the current file name.
+          const fullKey = pre.join("") + k
+          const end = fullKey.indexOf(enq)
+          write.limit =
+            write.halfKey ||
+            (end === -1 ? fullKey : fullKey.substring(0, end))
+          // Cannot split if the key is the same as the current file name.
           if (write.limit !== file) {
+            // Truncate to the balanced split point — text after halfOffset is
+            // handled by the write.slice call below, which reads from rad.
+            if (write.halfKey) {
+              write.text = write.text.substring(0, write.halfOffset)
+            }
             write.done = true
             write.sub = Radix()
             Radix.map(rad, write.slice)
@@ -330,6 +352,13 @@ const Radisk = opt => {
     // finished.
     const writeStart = Date.now()
     opt.store.put(file, write.text, err => {
+      // If a split occurred the cached radix tree still contains entries that
+      // were moved to the sub-file. Invalidate so the next save.mix re-reads
+      // from disk rather than re-writing those entries back to this file.
+      if (write.done) {
+        cache.delete(file)
+        fileListCache = null
+      }
       perfLog("file-write", writeStart, file, write.text.length)
       cb(err)
     })
@@ -340,71 +369,45 @@ const Radisk = opt => {
     const end = key.indexOf(enq)
     const soul = end === -1 ? key : key.substring(0, end)
 
-    const read = {
-      lex: file => {
-        // store.list should call lex without a file last, which means all file
-        // names were compared to soul, so the current read.file is ok to use.
-        if (!file) {
-          if (!read.file) {
-            cb("no file found", u)
-            return
-          }
-
-          // Check multi-file cache first
-          if (opt.cache && cache.has(read.file)) {
-            const cachedRadix = cache.get(read.file)
-            read.value = cachedRadix(key)
-            // Return cached result (defined or undefined) since in-memory
-            // radix tree is authoritative
-            return cb(u, read.value)
-          }
-
-          radisk.parse(read.file, read.it)
-          return
-        }
-
-        // Want the filename closest to soul.
-        if (file > soul || file < read.file) return
-
-        read.file = file
-      },
-      it: (err, disk) => {
-        if (err) opt.log(err)
-        if (disk) {
-          if (opt.cache) {
-            cache.set(read.file, disk)
-            checkMemoryUsage() // Check memory usage after adding to cache
-          }
-          read.value = disk(key)
-        }
-        cb(err, read.value)
-      },
-    }
-    const now = Date.now()
-    if (
-      opt.cache &&
-      fileListCache &&
-      now - fileListCacheTime < FILE_LIST_CACHE_TTL
-    ) {
-      // Use cached file list
-      fileListCache.forEach(file => read.lex(file))
-      read.lex() // Signal end of list
-    } else {
-      // Refresh cache
-      const files = []
-      const originalLex = read.lex
-      read.lex = file => {
-        if (file) files.push(file)
-        return originalLex(file)
+    // Binary search for largest filename <= soul in a sorted array.
+    const findFile = files => {
+      let lo = 0, hi = files.length - 1, result = null
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1
+        if (files[mid] <= soul) { result = files[mid]; lo = mid + 1 }
+        else { hi = mid - 1 }
       }
+      return result
+    }
 
+    const read = file => {
+      if (!file) { cb("no file found", u); return }
+      if (opt.cache && cache.has(file)) {
+        return cb(u, cache.get(file)(key))
+      }
+      radisk.parse(file, (err, disk) => {
+        if (err) opt.log(err)
+        if (disk && opt.cache) {
+          cache.set(file, disk)
+          checkMemoryUsage()
+        }
+        cb(err, disk ? disk(key) : u)
+      })
+    }
+
+    const now = Date.now()
+    if (opt.cache && fileListCache && now - fileListCacheTime < FILE_LIST_CACHE_TTL) {
+      read(findFile(fileListCache, soul))
+    } else {
+      const files = []
       opt.store.list(file => {
-        read.lex(file)
-        if (!file && opt.cache) {
-          // End of list - cache the results
+        if (file) { files.push(file); return }
+        files.sort()
+        if (opt.cache) {
           fileListCache = files
           fileListCacheTime = now
         }
+        read(findFile(files, soul))
       })
     }
   }

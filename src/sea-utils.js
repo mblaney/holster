@@ -1,6 +1,6 @@
 import SafeBuffer from "./buffer.js"
 
-const isNode = typeof document === "undefined"
+const isNode = typeof process !== "undefined" && process.versions?.node != null
 const crypto = isNode
   ? (await import(/*webpackIgnore: true*/ "node:crypto")).webcrypto
   : globalThis.crypto

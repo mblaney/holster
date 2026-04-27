@@ -6,7 +6,7 @@ import Holster from "../src/holster.js"
 
 describe("holster.on", () => {
   const wss = new Server("ws://localhost:1234")
-  const holster = Holster({file: "test/holster.on", wss: wss, maxAge: 100})
+  const holster = Holster({file: "test/holster.on", wss: wss})
 
   test("calling on without get callback null", (t, done) => {
     holster.on(data => {

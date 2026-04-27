@@ -6,7 +6,7 @@
 import SafeBuffer from "./buffer.ts"
 import type { JWK } from "./schemas.ts"
 
-const isNode = typeof document === "undefined"
+const isNode = typeof process !== "undefined" && process.versions?.node != null
 
 // Get crypto based on environment - dynamic import for Node.js compatibility
 const crypto: Crypto = isNode

@@ -184,7 +184,7 @@ export const WireOptionsSchema = z
   .object({
     secure: z.boolean().optional(),
     fast: z.boolean().optional(),
-    wait: z.number().optional(),
+    put: z.boolean().optional(),
   })
   .optional()
 export type WireOptions = z.infer<typeof WireOptionsSchema>
@@ -319,7 +319,6 @@ export const RadiskOptionsSchema = z.object({
   write: z.number().optional(),
   size: z.number().optional(),
   memoryLimit: z.number().optional(),
-  readTimeout: z.number().optional(),
   cache: z.boolean().optional(),
   store: FileSystemInterfaceSchema.optional(),
 })
@@ -330,7 +329,6 @@ export interface RadiskOptions {
   write?: number
   size?: number
   memoryLimit?: number
-  readTimeout?: number
   cache?: boolean
   store?: FileSystemInterface
 }
@@ -404,11 +402,9 @@ export const HolsterOptionsSchema = z
     port: z.number().optional(),
     server: z.any().optional(),
     wss: z.any().optional(),
-    maxAge: z.number().optional(),
     maxConnections: z.number().optional(),
     maxMessageSize: z.number().optional(),
     maxQueueLength: z.number().optional(),
-    wait: z.number().optional(),
   })
   .passthrough()
 export type HolsterOptions = z.infer<typeof HolsterOptionsSchema>

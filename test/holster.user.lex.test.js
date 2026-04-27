@@ -9,8 +9,6 @@ describe("holster.user.lex", () => {
   const holster = Holster({
     file: "test/holster.user.lex",
     wss: wss,
-    maxAge: 100,
-    wait: 500,
   })
   const user = holster.user()
 

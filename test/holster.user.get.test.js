@@ -9,8 +9,6 @@ describe("holster.user.get", () => {
   const holster = Holster({
     file: "test/holster.user.get",
     wss: wss,
-    maxAge: 100,
-    wait: 500,
   })
   const user = holster.user()
 

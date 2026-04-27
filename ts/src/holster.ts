@@ -123,28 +123,28 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
             delete (msg.put[soul] as { _?: unknown })._
             delete (msg.put[soul] as Record<string, unknown>)[utils.userPublicKey]
             delete (msg.put[soul] as Record<string, unknown>)[utils.userSignature]
-            for (const key of Object.keys(msg.put[soul]!)) {
-              const id = utils.rel.is(msg.put[soul]![key] as GraphValue)
-              if (id) {
-                const attemptRead = async (retries = 0): Promise<unknown> => {
-                  const data = await new Promise<unknown>(res => {
-                    const _ctxid = utils.text.random()
-                    const ctx = allctx.get(ctxid!)
-                    allctx.set(_ctxid, {
-                      chain: [{ item: null, soul: id }],
-                      user: ctx ? ctx.user : null,
-                    })
-                    api(_ctxid).next(null as never, res as never, _opt)
+            const node = msg.put[soul]!
+            await Promise.all(Object.keys(node).map(async key => {
+              const id = utils.rel.is(node[key] as GraphValue)
+              if (!id) return
+              const attemptRead = async (retries = 0): Promise<unknown> => {
+                const data = await new Promise<unknown>(res => {
+                  const _ctxid = utils.text.random()
+                  const ctx = allctx.get(ctxid!)
+                  allctx.set(_ctxid, {
+                    chain: [{ item: null, soul: id }],
+                    user: ctx ? ctx.user : null,
                   })
-                  if (data !== null || retries >= 5) {
-                    return data
-                  }
-                  await new Promise(resolve => setTimeout(resolve, 50))
-                  return attemptRead(retries + 1)
+                  api(_ctxid).next(null as never, res as never, _opt)
+                })
+                if (data !== null || retries >= 5) {
+                  return data
                 }
-                msg.put[soul]![key] = (await attemptRead()) as GraphValue
+                await new Promise(resolve => setTimeout(resolve, 50))
+                return attemptRead(retries + 1)
               }
-            }
+              node[key] = (await attemptRead()) as GraphValue
+            }))
             ack(msg.put[soul])
           } else {
             ack(null)
@@ -192,13 +192,16 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       item: string,
       ctx: ApiContext,
       i: number,
-      request: { on?: LexFilter; _get?: boolean; _opt?: WireOptions },
-      cb: (data: unknown) => void
+      request: { on?: LexFilter; get?: LexFilter; _get?: boolean; _opt?: WireOptions },
+      cb: (data: unknown) => void,
+      on = true
     ): void => {
+      let timer: ReturnType<typeof setTimeout> | null = null
       const handler = (): void => {
         // Bail out if the context was removed by off().
         if (!allctx.has(ctxid!)) {
           wire.off({ "#": soul, ".": item }, handler)
+          if (timer) clearTimeout(timer)
           return
         }
         wire.get(
@@ -206,16 +209,39 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           msg => {
             const node = msg.put && msg.put[soul]
             const id = utils.rel.is(node && node[item] as GraphValue)
-            if (!id) return
+            if (!id) {
+              // If it's a plain value (not a rel) and this is a get, deliver it.
+              // node._ guards against timeout null-acks which lack metadata.
+              if (!on && node && node._ && typeof node[item] !== "undefined") {
+                if (timer) clearTimeout(timer)
+                wire.off({ "#": soul, ".": item }, handler)
+                cb(node[item])
+              }
+              return
+            }
+            if (timer) clearTimeout(timer)
             wire.off({ "#": soul, ".": item }, handler)
             ctx.chain[i]!.soul = id
             allctx.set(ctxid!, { ...ctx })
-            api(ctxid).on(request.on!, cb, request._get, request._opt)
+            if (on) {
+              api(ctxid).on(request.on!, cb, request._get, request._opt)
+            } else {
+              api(ctxid).next(null as never, request.get as never, cb as never, request._opt)
+            }
           },
           { ...request._opt, secure: (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure }
         )
       }
       wire.on({ "#": soul, ".": item }, handler, false, request._opt)
+      // Time out after the same total duration as the on() retry loop
+      // (1+2+4+8+16 = 31s) so callers are not blocked forever if the node
+      // genuinely doesn't exist.
+      if (!on) {
+        timer = setTimeout(() => {
+          wire.off({ "#": soul, ".": item }, handler)
+          if (cb) cb(null)
+        }, 31000)
+      }
     }
 
     const resolve = (
@@ -240,7 +266,8 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       const off = typeof request.off !== "undefined"
 
       let found = false
-      const ctx = allctx.get(ctxid!)!
+      const ctx = allctx.get(ctxid!)
+      if (!ctx) return {item: null, soul: null}
       for (let i = 1; i < ctx.chain.length; i++) {
         if (ctx.chain[i]!.soul !== null) continue
         found = true
@@ -321,7 +348,17 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                 // Node doesn't exist yet — watch for it to appear.
                 watchForRel(soul!, item!, ctx, i, request, cb!)
                 if (request._get) cb!(null)
+              } else if (get && node) {
+                const sv = (node as Record<string, unknown> & {_?: {">": Record<string, unknown>}})._?.[">"]
+                if (sv && Object.keys(sv).length > 0 && typeof sv[item!] === "undefined") {
+                  // State vector has other properties but not this one — never written.
+                  if (cb) cb(null)
+                } else {
+                  // Empty state vector or item is tracked — may arrive via push.
+                  watchForRel(soul!, item!, ctx, i, request, cb!, false)
+                }
               } else {
+                // Soul doesn't exist or no get — return null.
                 if (cb) cb(null)
               }
             }
@@ -499,7 +536,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           return
         }
 
-        const resolved = resolve({ put: data }, _ack as never)
+        const resolved = resolve({ put: data, _opt: {put: true} }, _ack as never)
         if (!resolved) return
 
         const { item, soul } = resolved
@@ -566,7 +603,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                 wire.put(g, _ack as never)
               })
             },
-            { secure: (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure }
+            { secure: (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure, put: true }
           )
           return
         }
@@ -650,7 +687,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
 
               wire.put(g, _ack as never)
             },
-            { secure: (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure }
+            { secure: (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure, put: true }
           )
         }
         attemptRead()

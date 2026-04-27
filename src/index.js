@@ -3,7 +3,7 @@ import path from "path"
 import {fileURLToPath} from "url"
 import Holster from "./holster.js"
 
-const holster = Holster()
+const holster = Holster({port: 8765})
 
 // Note that express is only used here to serve the examples folder. It is not
 // required to run Holster itself.

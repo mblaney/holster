@@ -38,7 +38,6 @@ export interface UserInterface {
  */
 const User = (opt: HolsterOptions | undefined, wire?: WireInterface): UserInterface => {
   if (!wire) wire = Wire(opt as HolsterOptions)
-  const wait = opt?.wait ?? 5000
   let pubs: string[] = []
   let creating = false
   let authing = false
@@ -117,7 +116,6 @@ const User = (opt: HolsterOptions | undefined, wire?: WireInterface): UserInterf
 
           done(null)
         },
-        { wait: wait }
       )
     }
 
@@ -142,7 +140,6 @@ const User = (opt: HolsterOptions | undefined, wire?: WireInterface): UserInterf
         pubs = Object.keys(data)
         next()
       },
-      { wait: wait }
     )
   }
 
@@ -221,7 +218,6 @@ const User = (opt: HolsterOptions | undefined, wire?: WireInterface): UserInterf
             })
           })
         },
-        { wait: wait }
       )
     },
     auth: (username, password, cb) => {

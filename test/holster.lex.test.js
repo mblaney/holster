@@ -6,7 +6,7 @@ import Holster from "../src/holster.js"
 
 describe("holster.lex", () => {
   const wss = new Server("ws://localhost:1234")
-  const holster = Holster({file: "test/holster.lex", wss: wss, maxAge: 100})
+  const holster = Holster({file: "test/holster.lex", wss: wss})
 
   test("object on root in graph format", (t, done) => {
     const plain = {

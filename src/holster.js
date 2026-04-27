@@ -64,30 +64,28 @@ const Holster = opt => {
             delete msg.put[soul][utils.userPublicKey]
             delete msg.put[soul][utils.userSignature]
             // Resolve any rels on the node before returning to the user.
-            for (const key of Object.keys(msg.put[soul])) {
+            await Promise.all(Object.keys(msg.put[soul]).map(async key => {
               const id = utils.rel.is(msg.put[soul][key])
-              if (id) {
-                // Retry with delays if we get null
-                const attemptRead = async (retries = 0) => {
-                  const data = await new Promise(res => {
-                    const _ctxid = utils.text.random()
-                    const ctx = allctx.get(ctxid)
-                    allctx.set(_ctxid, {
-                      chain: [{item: null, soul: id}],
-                      user: ctx ? ctx.user : null,
-                    })
-                    api(_ctxid).next(null, res, _opt)
+              if (!id) return
+              const attemptRead = async (retries = 0) => {
+                const data = await new Promise(res => {
+                  const _ctxid = utils.text.random()
+                  const ctx = allctx.get(ctxid)
+                  allctx.set(_ctxid, {
+                    chain: [{item: null, soul: id}],
+                    user: ctx ? ctx.user : null,
                   })
-                  if (data !== null || retries >= 5) {
-                    return data
-                  }
-                  // Data not ready, retry after delay
-                  await new Promise(resolve => setTimeout(resolve, 50))
-                  return attemptRead(retries + 1)
+                  api(_ctxid).next(null, res, _opt)
+                })
+                if (data !== null || retries >= 5) {
+                  return data
                 }
-                msg.put[soul][key] = await attemptRead()
+                // Data not ready, retry after delay
+                await new Promise(resolve => setTimeout(resolve, 50))
+                return attemptRead(retries + 1)
               }
-            }
+              msg.put[soul][key] = await attemptRead()
+            }))
             ack(msg.put[soul])
           } else {
             // No data callback.
@@ -132,11 +130,13 @@ const Holster = opt => {
       }
     }
 
-    const watchForRel = (soul, item, ctx, i, request, cb) => {
+    const watchForRel = (soul, item, ctx, i, request, cb, on = true) => {
+      let timer = null
       const handler = () => {
         // Bail out if the context was removed by off().
         if (!allctx.has(ctxid)) {
           wire.off({"#": soul, ".": item}, handler)
+          if (timer) clearTimeout(timer)
           return
         }
         wire.get(
@@ -144,16 +144,39 @@ const Holster = opt => {
           msg => {
             const node = msg.put && msg.put[soul]
             const id = utils.rel.is(node && node[item])
-            if (!id) return
+            if (!id) {
+              // If it's a plain value (not a rel) and this is a get, deliver it.
+              // node._ guards against timeout null-acks which lack metadata.
+              if (!on && node && node._ && typeof node[item] !== "undefined") {
+                if (timer) clearTimeout(timer)
+                wire.off({"#": soul, ".": item}, handler)
+                cb(node[item])
+              }
+              return
+            }
+            if (timer) clearTimeout(timer)
             wire.off({"#": soul, ".": item}, handler)
             ctx.chain[i].soul = id
             allctx.set(ctxid, {...ctx})
-            api(ctxid).on(request.on, cb, request._get, request._opt)
+            if (on) {
+              api(ctxid).on(request.on, cb, request._get, request._opt)
+            } else {
+              api(ctxid).next(null, request.get, cb, request._opt)
+            }
           },
-          {...request._opt, secure: ctx.user || opt.secure},
+          {...request._opt, secure: !!(ctx.user || opt.secure)},
         )
       }
       wire.on({"#": soul, ".": item}, handler, false, request._opt)
+      // Time out after the same total duration as the on() retry loop
+      // (1+2+4+8+16 = 31s) so callers are not blocked forever if the node
+      // genuinely doesn't exist.
+      if (!on) {
+        timer = setTimeout(() => {
+          wire.off({"#": soul, ".": item}, handler)
+          if (cb) cb(null)
+        }, 31000)
+      }
     }
 
     const resolve = (request, cb) => {
@@ -169,6 +192,7 @@ const Holster = opt => {
 
       let found = false
       const ctx = allctx.get(ctxid)
+      if (!ctx) return {item: null, soul: null}
       for (var i = 1; i < ctx.chain.length; i++) {
         if (ctx.chain[i].soul !== null) continue
 
@@ -255,13 +279,22 @@ const Holster = opt => {
                 // Node doesn't exist yet — watch for it to appear.
                 watchForRel(soul, item, ctx, i, request, cb)
                 if (request._get) cb(null)
+              } else if (get && node) {
+                const sv = node._ && node._[">"]
+                if (sv && Object.keys(sv).length > 0 && typeof sv[item] === "undefined") {
+                  // State vector has other properties but not this one — never written.
+                  if (cb) cb(null)
+                } else {
+                  // Empty state vector or item is tracked — may arrive via push.
+                  watchForRel(soul, item, ctx, i, request, cb, false)
+                }
               } else {
-                // Allow querying a node that doesn't exist.
+                // Soul doesn't exist or no get — return null.
                 if (cb) cb(null)
               }
             }
           },
-          {...request._opt, secure: ctx.user || opt.secure},
+          {...request._opt, secure: !!(ctx.user || opt.secure)},
         )
         // Callback has been passed to next soul lookup or called above, so
         // return false as the calling code should not continue.
@@ -406,7 +439,7 @@ const Holster = opt => {
 
         // Resolve the current context before putting data. (Note that set is
         // not passed to resolve because it's already been applied above.)
-        const {item, soul} = resolve({put: data}, _ack)
+        const {item, soul} = resolve({put: data, _opt: {put: true}}, _ack)
         if (!soul) return
 
         if (result === true) {
@@ -475,7 +508,7 @@ const Holster = opt => {
                 wire.put(g, _ack)
               })
             },
-            {secure: ctx.user || opt.secure},
+            {secure: !!(ctx.user || opt.secure), put: true},
           )
           return
         }
@@ -515,7 +548,7 @@ const Holster = opt => {
                   } else {
                     const _ctxid = utils.text.random()
                     const chain = [{item: item, soul: soul}]
-                    // Pass on the previous context's callback and user flag here.
+                    // Pass on the previous ctx's callback and user flag here.
                     allctx.set(_ctxid, {
                       chain: chain,
                       user: ctx.user,
@@ -564,7 +597,7 @@ const Holster = opt => {
 
               wire.put(g, _ack)
             },
-            {secure: ctx.user || opt.secure},
+            {secure: !!(ctx.user || opt.secure), put: true},
           )
         }
         attemptRead()
@@ -611,8 +644,8 @@ const Holster = opt => {
         map.set(cb, () => {
           // Bail out if off() has already cleaned up this context — the mapped
           // callback can fire twice (once from wire.on and once from the _get
-          // immediate-read path) and the second call after async context cleanup
-          // would crash in resolve(). Matches the guard in watchForRel.
+          // immediate-read path) and the second call after async context
+          // cleanup would crash in resolve(). Matches the guard in watchForRel.
           if (!allctx.has(ctxid)) return
           // Cancel any pending retry — the persistent listener firing means we
           // have an update and should not call cb twice.
@@ -635,7 +668,8 @@ const Holster = opt => {
                       chain: [{item: null, soul: id}],
                       user: ctx ? ctx.user : null,
                     })
-                    api(_ctxid).next(null, res, retries === 0 ? utils.obj.put(_opt, "fast", true) : _opt)
+                    api(_ctxid).next(null, res, retries === 0 ?
+                                     utils.obj.put(_opt, "fast", true) : _opt)
                   })
                   if (data !== null || retries >= 5) {
                     retryCount = 0 // Reset retry counter on success
@@ -661,7 +695,8 @@ const Holster = opt => {
                   // miss and never fire again if the data doesn't change while
                   // the listener is attached, so we must poll for initial load.
                   const retry = () => {
-                    const delay = Math.min(retryDelay * Math.pow(2, retryCount), 30000)
+                    const delay =
+                          Math.min(retryDelay * Math.pow(2, retryCount), 30000)
                     retryCount++
                     retryTimer = setTimeout(() => {
                       wire.get(
@@ -680,7 +715,7 @@ const Holster = opt => {
                             cb(null)
                           }
                         },
-                        {..._opt, secure: ctx.user || opt.secure},
+                        {..._opt, secure: !!(ctx.user || opt.secure)},
                       )
                     }, delay)
                   }
@@ -690,7 +725,7 @@ const Holster = opt => {
                 }
               }
             },
-            {..._opt, secure: ctx.user || opt.secure},
+            {..._opt, secure: !!(ctx.user || opt.secure)},
           )
         })
 
@@ -737,7 +772,7 @@ const Holster = opt => {
               map.get(cb)()
             }
           },
-          {..._opt, secure: ctx.user || opt.secure},
+          {..._opt, secure: !!(ctx.user || opt.secure)},
         )
       },
       off: cb => {
@@ -751,9 +786,10 @@ const Holster = opt => {
         const {item, soul} = resolve({off: true}, cb)
         if (!soul) return
 
-        // Remove listener immediately from the original soul to avoid race condition.
-        // The listener may be on a related soul if item is a rel, but we remove
-        // from the original soul first since that's where it's initially registered.
+        // Remove listener immediately from the original soul to avoid a race
+        // condition. The listener may be on a related soul if item is a rel,
+        // but we remove from the original soul first since that's where it's
+        //initially registered.
         wire.off({"#": soul}, map.get(cb))
 
         // Check if item is a rel and remove from the related node as well.

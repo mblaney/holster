@@ -1,8 +1,3 @@
-/**
- * Dup - Duplicate message tracking for wire protocol
- * Prevents processing the same message multiple times
- */
-
 export interface DupInterface {
   store: Record<string, number>
   check: (id: string) => string | false
@@ -10,13 +5,8 @@ export interface DupInterface {
   expiry: NodeJS.Timeout | null
 }
 
-/**
- * Create a duplicate message tracker
- * @param maxAge - Maximum age of tracked messages in milliseconds (default: 9000)
- * @returns Dup interface for checking and tracking message IDs
- */
-const Dup = (maxAge?: number): DupInterface => {
-  const maxAgeMs = maxAge || 9000
+const Dup = (): DupInterface => {
+  const maxAge = 9000
   const dup: DupInterface = {
     store: {},
     expiry: null,
@@ -28,16 +18,16 @@ const Dup = (maxAge?: number): DupInterface => {
       dup.store[id] = Date.now()
       if (!dup.expiry) {
         dup.expiry = setTimeout(() => {
-          if (!dup.expiry) return
-
           const now = Date.now()
           Object.keys(dup.store).forEach(id => {
-            if (now - dup.store[id]! > maxAgeMs) {
+            if (now - dup.store[id]! > maxAge) {
               delete dup.store[id]
             }
           })
           dup.expiry = null
-        }, maxAgeMs)
+        }, maxAge)
+        // Don't block process exit — cleanup is best-effort.
+        if (dup.expiry.unref) dup.expiry.unref()
       }
       return id
     },
@@ -46,4 +36,3 @@ const Dup = (maxAge?: number): DupInterface => {
 }
 
 export default Dup
-

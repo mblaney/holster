@@ -6,7 +6,7 @@ import Holster from "../src/holster.js"
 
 describe("holster.put", () => {
   const wss = new Server("ws://localhost:1234")
-  const holster = Holster({file: "test/holster.put", wss: wss, maxAge: 100})
+  const holster = Holster({file: "test/holster.put", wss: wss})
 
   test("put and get string on root", (t, done) => {
     holster.get("key").put("value", err => {
