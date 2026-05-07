@@ -521,8 +521,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         const ctx = allctx.get(ctxid!)
         if (!ctx) return
 
-        if (!ctx.cb) {
-          if (!callback) return
+        if (!ctx.cb && callback) {
           ctx.cb = callback as never
           callback = undefined
         }
@@ -845,10 +844,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
             const id = utils.rel.is(current as GraphValue)
             if (id) {
               wire.off(initialLex as never, map.get(callback)!)
-              const relLex = (lexFilter
-                ? utils.obj.put(initialLex as never, "#", id)
-                : { "#": id, ".": null }) as Lex
-              wire.on(relLex, map.get(callback)!, false, opts)
+              wire.on({ "#": id, ".": null } as never, map.get(callback)!, false, opts)
               if (_get) map.get(callback)!()
             } else if (_get) {
               // Not a rel, but _get was requested, so trigger callback.
