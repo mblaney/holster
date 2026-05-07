@@ -420,9 +420,7 @@ const Holster = opt => {
         // ctx already removed by another chained callback is ok?
         if (!ctx) return
 
-        if (!ctx.cb) {
-          if (!cb) return
-
+        if (!ctx.cb && cb) {
           // This (and ack) allows nested objects to set their own callbacks.
           ctx.cb = cb
           cb = null
@@ -762,10 +760,7 @@ const Holster = opt => {
               // First remove the initial listener
               wire.off(initialLex, map.get(cb))
               // Then add listener on the related node
-              let relLex
-              if (lex) relLex = utils.obj.put(initialLex, "#", id)
-              else relLex = {"#": id, ".": null}
-              wire.on(relLex, map.get(cb), false, _opt)
+              wire.on({"#": id, ".": null}, map.get(cb), false, _opt)
               if (_get) map.get(cb)()
             } else if (_get) {
               // Not a rel, but _get was requested, so trigger callback.

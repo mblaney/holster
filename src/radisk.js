@@ -58,7 +58,7 @@ const Radisk = opt => {
   // Performance logging
   const perfLog = (operation, startTime, key, size) => {
     const duration = Date.now() - startTime
-    if (duration > 2000) {
+    if (duration > 3000) {
       console.log(
         `[RADISK-SLOW] ${operation}: ${duration}ms for ${key}${size ? ` (${size} bytes)` : ""}`,
       )
