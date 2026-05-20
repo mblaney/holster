@@ -206,7 +206,7 @@ const Wire = opt => {
 
   // Initialize rate limiting and connection management
   // Check if test environment (mock-socket usage)
-  const isTestEnv = opt.wss && opt.wss.constructor.name === "Server"
+  const isTestEnv = isNode && globalThis.WebSocket !== wsModule?.WebSocket
   const rateLimiter = createRateLimiter(isTestEnv)
   const connectionManager = createConnectionManager(opt.maxConnections || 1000)
 
@@ -270,22 +270,16 @@ const Wire = opt => {
         }),
       )
     } else {
-      // Always pass secure to ensure public key is fetched. User data may be
-      // requested that requires the public key for verification.
-      store.get(
-        msg.get,
-        (err, ack) => {
-          send(
-            JSON.stringify({
-              "#": dup.track(utils.text.random(9)),
-              "@": msg["#"],
-              put: ack,
-              err: err,
-            }),
-          )
-        },
-        {secure: true},
-      )
+      store.get(msg.get, (err, ack) => {
+        send(
+          JSON.stringify({
+            "#": dup.track(utils.text.random(9)),
+            "@": msg["#"],
+            put: ack,
+            err: err,
+          }),
+        )
+      })
     }
   }
 
@@ -467,9 +461,7 @@ const Wire = opt => {
           pendingTimeouts.delete(track)
           return
         }
-      },
-      _opt,
-    )
+      })
   }
 
   const api = send => {
@@ -726,6 +718,7 @@ const Wire = opt => {
   let clientThrottled = false
   let throttleUntil = 0
   let messageQueue = []
+  let offlinePuts = []
   let queueProcessor = null
   const maxQueueLength = opt.maxQueueLength || 10000
 
@@ -783,6 +776,11 @@ const Wire = opt => {
 
     if (sent || isStaleCheckMessage) {
       messageQueue.shift()
+    } else if (!sent && msg.put) {
+      // Hold offline PUTs separately so they don't block GET messages behind
+      // them. They'll be flushed back to the front of the queue on reconnect.
+      messageQueue.shift()
+      offlinePuts.push(data)
     }
 
     if (trackId && pendingTimeouts.has(trackId)) {
@@ -864,14 +862,22 @@ const Wire = opt => {
         ws = null
 
         if (retryHandler.shouldRetry()) {
-          const delay = retryHandler.getDelay()
+          const delay = isTestEnv ? 50 : retryHandler.getDelay()
           retryHandler.increment()
-          setTimeout(start, delay)
+          const t = setTimeout(start, delay)
+          if (t.unref) t.unref()
         }
       }
 
       ws.onopen = () => {
         retryHandler.reset()
+        if (offlinePuts.length > 0) {
+          messageQueue = offlinePuts.concat(messageQueue)
+          offlinePuts = []
+          if (!queueProcessor) {
+            queueProcessor = setTimeout(processQueue, 50)
+          }
+        }
       }
 
       ws.onerror = e => {

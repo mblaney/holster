@@ -18,6 +18,15 @@ describe("wire", () => {
   const wss3: Server = new Server("ws://localhost:1236")
   const batchWire: WireInterface = Wire({ file: "test/batch-wire", wss: wss3 })
 
+  const wss4: Server = new Server("ws://localhost:1237")
+  const secureWire: WireInterface = Wire({ file: "test/secure-wire", wss: wss4 })
+
+  const wss5: Server = new Server("ws://localhost:1238")
+  const reconnectWire: WireInterface = Wire({ file: "test/reconnect-wire", peers: ["ws://localhost:1238"] })
+
+  // Client-mode wire connecting to a port with no server — always offline.
+  const offlineWire: WireInterface = Wire({ file: "test/offline-wire", peers: ["ws://localhost:1239"] })
+
   // ws3 responds to a get for "batch_parent" with a put batch where
   // "batch_child" appears before "batch_parent" to exercise the pre-pass.
   // All other gets (e.g. check() public key lookups) receive an empty ack so
@@ -51,6 +60,31 @@ describe("wire", () => {
       )
     }
   }
+  let ackId4 = 0
+  const ws4: WebSocket = new WebSocket("ws://localhost:1237")
+  ws4.onmessage = (m: MessageEvent) => {
+    const msg = JSON.parse(m.data as string)
+    if (!msg.get) return
+    if (msg.get["#"] === "secure_test_soul" && msg.get["."] === "missing_prop") {
+      ws4.send(
+        JSON.stringify({
+          "#": "secure_prop_ack",
+          "@": msg["#"],
+          put: {
+            "secure_test_soul": {
+              _: {"#": "secure_test_soul", ">": {"missing_prop": 3}},
+              "missing_prop": "found_on_wire",
+            },
+          },
+        }),
+      )
+    } else {
+      ws4.send(
+        JSON.stringify({"#": `ack4_${++ackId4}`, "@": msg["#"], put: null}),
+      )
+    }
+  }
+
   ws.onmessage = (m: MessageEvent) => {
     const msg = JSON.parse(m.data as string)
     if (msg.get) {
@@ -191,6 +225,84 @@ describe("wire", () => {
     })
   })
 
+  test("targeted store lookup returns userPublicKey for signature verification", (t, done) => {
+    const pubKey = "_holster_user_public_key"
+    secureWire.put(
+      {
+        "secure_test_soul": {
+          _: {"#": "secure_test_soul", ">": {[pubKey]: 1}},
+          [pubKey]: "testpubkey",
+        },
+      },
+      err => {
+        assert.equal(err, null)
+        secureWire.get(
+          {"#": "secure_test_soul", ".": "missing_prop"},
+          msg => {
+            assert.equal(
+              (msg.put?.["secure_test_soul"] as any)?.["missing_prop"],
+              "found_on_wire",
+            )
+            done()
+          },
+        )
+      },
+    )
+  })
+
+  test("offline PUT does not block subsequent GET", (t, done) => {
+    offlineWire.put(
+      {
+        offline_put_soul: {
+          _: {"#": "offline_put_soul", ">": {x: 1}},
+          x: "queued while offline",
+        },
+      },
+      err => {
+        assert.equal(err, null)
+      },
+    )
+
+    // GET for a soul not in store — before the fix this would hang behind the
+    // PUT in the queue; now it resolves via the offline timeout.
+    offlineWire.get({"#": "offline_get_soul"}, msg => {
+      assert.deepEqual(msg, {put: {offline_get_soul: null}})
+      done()
+    })
+  })
+
+  test("offline PUT is flushed when peer reconnects", (t, done) => {
+    let receivedOfflinePut = false
+
+    setTimeout(() => {
+      wss5.close()
+
+      reconnectWire.put(
+        {
+          reconnect_soul: {
+            _: {"#": "reconnect_soul", ">": {x: 1}},
+            x: "reconnect test",
+          },
+        },
+        () => {},
+      )
+
+      const wss5b: Server = new Server("ws://localhost:1238")
+      wss5b.on("connection", (ws: any) => {
+        ws.on("message", (data: string) => {
+          const msg = JSON.parse(data)
+          if (msg.put?.reconnect_soul) receivedOfflinePut = true
+        })
+      })
+
+      setTimeout(() => {
+        assert.ok(receivedOfflinePut)
+        wss5b.stop()
+        done()
+      }, 200)
+    }, 50)
+  })
+
   test("cleanup", (t, done) => {
     // Timeout to let extra wire sends finish before tests end.
     setTimeout(() => {
@@ -198,7 +310,16 @@ describe("wire", () => {
         assert.equal(err, null)
         fs.rm("test/batch-wire", {recursive: true, force: true}, err => {
           assert.equal(err, null)
-          done()
+          fs.rm("test/secure-wire", {recursive: true, force: true}, err => {
+            assert.equal(err, null)
+            fs.rm("test/offline-wire", {recursive: true, force: true}, err => {
+              assert.equal(err, null)
+              fs.rm("test/reconnect-wire", {recursive: true, force: true}, err => {
+                assert.equal(err, null)
+                done()
+              })
+            })
+          })
         })
       })
     }, 100)

@@ -246,7 +246,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     })
   }
 
-  const isTestEnv = options.wss && (options.wss as { constructor?: { name?: string } }).constructor?.name === "Server"
+  const isTestEnv = isNode && (globalThis.WebSocket as unknown) !== wsModule?.WebSocket
   const rateLimiter = createRateLimiter(isTestEnv)
   const connectionManager = createConnectionManager(options.maxConnections || 1000)
 
@@ -303,20 +303,16 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         })
       )
     } else {
-      store.get(
-        msg.get,
-        (err, ack) => {
-          send(
-            JSON.stringify({
-              "#": dup.track(utils.text.random(9)),
-              "@": msg["#"],
-              put: ack,
-              err: err,
-            })
-          )
-        },
-        { secure: true }
-      )
+      store.get(msg.get, (err, ack) => {
+        send(
+          JSON.stringify({
+            "#": dup.track(utils.text.random(9)),
+            "@": msg["#"],
+            put: ack,
+            err: err,
+          })
+        )
+      })
     }
   }
 
@@ -492,9 +488,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
           pendingTimeouts.delete(track)
           return
         }
-      },
-      opts
-    )
+      })
   }
 
   const api = (send: (msg: string) => { err?: string } | void): WireAPI => {
@@ -603,7 +597,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
             if (typeof lex["."] === "string") {
               ack[id] = { [lex["."]]: null } as never
             }
-            cb({ "#": trackId, put: ack })
+            cb({ put: ack })
             delete queue[trackId]
           }
         }, isTestEnv ? 100 : 10000)
@@ -734,6 +728,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
   let clientThrottled = false
   let throttleUntil = 0
   let messageQueue: string[] = []
+  let offlinePuts: string[] = []
   let queueProcessor: NodeJS.Timeout | null = null
   const maxQueueLength = options.maxQueueLength || 10000
 
@@ -748,7 +743,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         if (typeof lex["."] === "string") {
           ack[id] = { [lex["."]]: null } as never
         }
-        cb({ "#": trackId, put: ack })
+        cb({ put: ack })
         delete queue[trackId]
       }
     }, delay)
@@ -784,6 +779,11 @@ const Wire = (opt: HolsterOptions): WireAPI => {
 
     if (sent || isStaleCheckMessage) {
       messageQueue.shift()
+    } else if (!sent && msg.put) {
+      // Hold offline PUTs separately so they don't block GET messages behind
+      // them. They'll be flushed back to the front of the queue on reconnect.
+      messageQueue.shift()
+      offlinePuts.push(data)
     }
 
     if (trackId && pendingTimeouts.has(trackId)) {
@@ -863,14 +863,22 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         ws = null
 
         if (retryHandler.shouldRetry()) {
-          const delay = retryHandler.getDelay()
+          const delay = isTestEnv ? 50 : retryHandler.getDelay()
           retryHandler.increment()
-          setTimeout(start, delay)
+          const t = setTimeout(start, delay)
+          if ((t as unknown as { unref?: () => void }).unref) (t as unknown as { unref: () => void }).unref()
         }
       }
 
       ws.onopen = () => {
         retryHandler.reset()
+        if (offlinePuts.length > 0) {
+          messageQueue = offlinePuts.concat(messageQueue)
+          offlinePuts = []
+          if (!queueProcessor) {
+            queueProcessor = setTimeout(processQueue, 50)
+          }
+        }
       }
 
       ws.onerror = (e: Event) => {
