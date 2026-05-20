@@ -197,7 +197,7 @@ const Store = opt => {
   const radisk = Radisk(opt)
 
   return {
-    get: (lex, cb, _opt) => {
+    get: (lex, cb) => {
       if (!lex || !utils.obj.is(lex)) {
         cb("lex required")
         return
@@ -207,41 +207,54 @@ const Store = opt => {
         return
       }
 
-      if (!_opt) _opt = {}
-
       var soul = lex["#"]
-      var key = !_opt.secure && typeof lex["."] === "string" ? lex["."] : ""
+      var key = typeof lex["."] === "string" ? lex["."] : ""
       var node
       var signatures = {}
-      const each = (value, key) => {
-        // Always include userPublicKey for verification, regardless of filter
-        if (key !== utils.userPublicKey && !utils.match(lex["."], key)) return
+      const each = (value, k) => {
+        if (k !== utils.userPublicKey && !utils.match(lex["."], k)) return
 
         if (!node) node = {_: {"#": soul, ">": {}}}
-        node[key] = value[0]
-        node._[">"][key] = value[1]
+        node[k] = value[0]
+        node._[">"][k] = value[1]
         // If signature is present, store it in _["s"]
         if (value.length === 3 && value[2]) {
           signatures[value[1]] = value[2]
         }
       }
 
+      // When doing a targeted property lookup, also fetch userPublicKey in
+      // parallel so ham.js can verify signatures regardless of secure mode.
+      // Full-soul scans (key="") already surface it via Radix.map.
+      const needsPubKey = key !== "" && key !== utils.userPublicKey
+      let pending = needsPubKey ? 2 : 1
+      let cbErr = null
+      const finish = err => {
+        if (err && !cbErr) cbErr = err
+        if (--pending > 0) return
+        const graph = {[soul]: node}
+        if (node && Object.keys(signatures).length > 0) {
+          node._["s"] = signatures
+        }
+        cb(cbErr, graph)
+      }
+
       radisk(soul + enq + key, (err, value) => {
-        let graph
         if (utils.obj.is(value)) {
           Radix.map(value, each)
           if (!node) each(value, key)
-          graph = {[soul]: node}
         } else if (value) {
           each(value, key)
-          graph = {[soul]: node}
         }
-        // Only add _["s"] if we found any signatures
-        if (graph && graph[soul] && Object.keys(signatures).length > 0) {
-          graph[soul]._["s"] = signatures
-        }
-        cb(err, graph)
+        finish(err)
       })
+
+      if (needsPubKey) {
+        radisk(soul + enq + utils.userPublicKey, (err, value) => {
+          if (value && !utils.obj.is(value)) each(value, utils.userPublicKey)
+          finish(err)
+        })
+      }
     },
     put: (graph, cb) => {
       if (!graph) {

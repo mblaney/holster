@@ -212,7 +212,6 @@ export interface StoreInterface {
   get: (
     lex: Lex,
     cb: (err?: string | null, graph?: Graph) => void,
-    _opt?: { secure?: boolean }
   ) => void
   put: (graph: Graph, cb: (err?: string | null) => void) => void
 }
@@ -227,7 +226,7 @@ const Store = (opt?: StoreOptions): StoreInterface => {
   const radisk = Radisk(options as never)
 
   return {
-    get: (lex, cb, _opt) => {
+    get: (lex, cb) => {
       if (!lex || !utils.obj.is(lex)) {
         cb("lex required")
         return
@@ -237,42 +236,55 @@ const Store = (opt?: StoreOptions): StoreInterface => {
         return
       }
 
-      const opts = _opt || {}
       const soul = lex["#"]
-      const key =
-        !opts.secure && typeof lex["."] === "string" ? lex["."] : ""
+      const key = typeof lex["."] === "string" ? lex["."] : ""
       let node: GraphNode | undefined
       const signatures: Record<string, string> = {}
 
-      const each = (value: EncodedValue, key: string): void => {
-        // Always include userPublicKey for verification, regardless of filter
-        if (key !== utils.userPublicKey && !utils.match(lex["."], key)) return
+      const each = (value: EncodedValue, k: string): void => {
+        if (k !== utils.userPublicKey && !utils.match(lex["."], k)) return
 
         if (!node) node = { _: { "#": soul, ">": {} } }
-        node[key] = value[0]
-        node._[">"][key] = value[1]
+        node[k] = value[0]
+        node._[">"][k] = value[1]
         // If signature is present, store it in _["s"]
         if (value.length === 3 && value[2]) {
           signatures[value[1].toString()] = value[2]
         }
       }
 
+      // When doing a targeted property lookup, also fetch userPublicKey in
+      // parallel so ham.js can verify signatures regardless of secure mode.
+      // Full-soul scans (key="") already surface it via Radix.map.
+      const needsPubKey = key !== "" && key !== utils.userPublicKey
+      let pending = needsPubKey ? 2 : 1
+      let cbErr: string | null = null
+      const finish = (err: string | null | undefined): void => {
+        if (err && !cbErr) cbErr = err
+        if (--pending > 0) return
+        const graph: Graph = { [soul]: node! }
+        if (node && Object.keys(signatures).length > 0) {
+          node._["s"] = signatures
+        }
+        cb(cbErr, graph)
+      }
+
       radisk(soul + enq + key, (err, value) => {
-        let graph: Graph | undefined
         if (utils.obj.is(value)) {
           Radix.map(value as never, each)
           if (!node) each(value as never, key)
-          graph = { [soul]: node! }
         } else if (value) {
           each(value as EncodedValue, key)
-          graph = { [soul]: node! }
         }
-        // Only add _["s"] if we found any signatures
-        if (graph && graph[soul] && Object.keys(signatures).length > 0) {
-          graph[soul]._["s"] = signatures
-        }
-        cb(err, graph)
+        finish(err)
       })
+
+      if (needsPubKey) {
+        radisk(soul + enq + utils.userPublicKey, (err, value) => {
+          if (value && !utils.obj.is(value)) each(value as EncodedValue, utils.userPublicKey)
+          finish(err)
+        })
+      }
     },
     put: (graph, cb) => {
       if (!graph) {

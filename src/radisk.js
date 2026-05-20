@@ -55,16 +55,6 @@ const Radisk = opt => {
     return
   }
 
-  // Performance logging
-  const perfLog = (operation, startTime, key, size) => {
-    const duration = Date.now() - startTime
-    if (duration > 3000) {
-      console.log(
-        `[RADISK-SLOW] ${operation}: ${duration}ms for ${key}${size ? ` (${size} bytes)` : ""}`,
-      )
-    }
-  }
-
   // Memory monitoring and cache cleanup
   const checkMemoryUsage = () => {
     if (typeof process === "undefined" || !process.memoryUsage) return
@@ -129,7 +119,6 @@ const Radisk = opt => {
       }
 
       pendingReads.set(key, [cb])
-      const readStart = Date.now()
       // If radisk.read genuinely hangs (fd leak, stuck I/O), recover
       // callbacks as a cache miss so callers can fall through to the wire path.
       // 30s is long enough to distinguish a hang from a slow-but-healthy read.
@@ -142,7 +131,6 @@ const Radisk = opt => {
       }, 30000)
       return radisk.read(key, (err, result) => {
         clearTimeout(timeout)
-        perfLog("read", readStart, key)
         const callbacks = pendingReads.get(key) || []
         pendingReads.delete(key)
         callbacks.forEach(callback => callback(err, result))
@@ -175,7 +163,6 @@ const Radisk = opt => {
       return (radisk.thrash.more = true)
     }
 
-    const thrashStart = Date.now()
     clearTimeout(radisk.batch.timeout)
     radisk.thrash.more = false
     radisk.thrash.ing = true
@@ -191,7 +178,6 @@ const Radisk = opt => {
       // file needs to be split.
       if (++i > 1) return
 
-      perfLog("thrash", thrashStart, `batch-${batch.ed}`)
       if (err) opt.log(err)
       batch.acks.forEach(cb => cb(err))
       radisk.thrash.at = null
@@ -350,7 +336,6 @@ const Radisk = opt => {
     Radix.map(rad, write.each, true)
     // There is always accumulated write.text to store once write.each has
     // finished.
-    const writeStart = Date.now()
     opt.store.put(file, write.text, err => {
       // If a split occurred the cached radix tree still contains entries that
       // were moved to the sub-file. Invalidate so the next save.mix re-reads
@@ -359,7 +344,6 @@ const Radisk = opt => {
         cache.delete(file)
         fileListCache = null
       }
-      perfLog("file-write", writeStart, file, write.text.length)
       cb(err)
     })
   }

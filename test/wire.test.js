@@ -20,6 +20,12 @@ describe("wire", () => {
   const wss4 = new Server("ws://localhost:1237")
   const secureWire = Wire({file: "test/secure-wire", wss: wss4})
 
+  const wss5 = new Server("ws://localhost:1238")
+  const reconnectWire = Wire({file: "test/reconnect-wire", peers: ["ws://localhost:1238"]})
+
+  // Client-mode wire connecting to a port with no server — always offline.
+  const offlineWire = Wire({file: "test/offline-wire", peers: ["ws://localhost:1239"]})
+
   // ws3 responds to a get for "batch_parent" with a put batch where
   // "batch_child" appears before "batch_parent" to exercise the pre-pass.
   // All other gets (e.g. check() public key lookups) receive an empty ack so
@@ -217,7 +223,7 @@ describe("wire", () => {
     })
   })
 
-  test("secure full-node store fetch does not mask missing property", (t, done) => {
+  test("targeted store lookup returns userPublicKey for signature verification", (t, done) => {
     const pubKey = "_holster_user_public_key"
     secureWire.put(
       {
@@ -237,10 +243,62 @@ describe("wire", () => {
             )
             done()
           },
-          {secure: true},
         )
       },
     )
+  })
+
+  test("offline PUT does not block subsequent GET", (t, done) => {
+    offlineWire.put(
+      {
+        offline_put_soul: {
+          _: {"#": "offline_put_soul", ">": {x: 1}},
+          x: "queued while offline",
+        },
+      },
+      err => {
+        assert.equal(err, null)
+      },
+    )
+
+    // GET for a soul not in store — before the fix this would hang behind the
+    // PUT in the queue; now it resolves via the offline timeout.
+    offlineWire.get({"#": "offline_get_soul"}, msg => {
+      assert.deepEqual(msg, {put: {offline_get_soul: null}})
+      done()
+    })
+  })
+
+  test("offline PUT is flushed when peer reconnects", (t, done) => {
+    let receivedOfflinePut = false
+
+    setTimeout(() => {
+      wss5.close()
+
+      reconnectWire.put(
+        {
+          reconnect_soul: {
+            _: {"#": "reconnect_soul", ">": {x: 1}},
+            x: "reconnect test",
+          },
+        },
+        () => {},
+      )
+
+      const wss5b = new Server("ws://localhost:1238")
+      wss5b.on("connection", ws => {
+        ws.on("message", data => {
+          const msg = JSON.parse(data)
+          if (msg.put?.reconnect_soul) receivedOfflinePut = true
+        })
+      })
+
+      setTimeout(() => {
+        assert.ok(receivedOfflinePut)
+        wss5b.stop()
+        done()
+      }, 200)
+    }, 50)
   })
 
   test("cleanup", (t, done) => {
@@ -252,7 +310,13 @@ describe("wire", () => {
           assert.equal(err, null)
           fs.rm("test/secure-wire", {recursive: true, force: true}, err => {
             assert.equal(err, null)
-            done()
+            fs.rm("test/offline-wire", {recursive: true, force: true}, err => {
+              assert.equal(err, null)
+              fs.rm("test/reconnect-wire", {recursive: true, force: true}, err => {
+                assert.equal(err, null)
+                done()
+              })
+            })
           })
         })
       })

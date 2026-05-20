@@ -82,14 +82,6 @@ const Radisk = (opt: RadiskOptions) => {
   // After validation, store is guaranteed to be defined
   const store = options.store
 
-  const perfLog = (operation: string, startTime: number, key: string, size?: number): void => {
-    const duration = Date.now() - startTime
-    if (duration > 3000) {
-      console.log(
-        `[RADISK-SLOW] ${operation}: ${duration}ms for ${key}${size ? ` (${size} bytes)` : ""}`
-      )
-    }
-  }
 
   const checkMemoryUsage = (): void => {
     if (typeof process === "undefined" || !process.memoryUsage) return
@@ -143,7 +135,6 @@ const Radisk = (opt: RadiskOptions) => {
       }
 
       pendingReads.set(key, [callback])
-      const readStart = Date.now()
       const timeout = setTimeout(() => {
         const callbacks = pendingReads.get(key)
         if (!callbacks) return
@@ -153,7 +144,6 @@ const Radisk = (opt: RadiskOptions) => {
       }, 30000)
       return radisk.read(key, (err, result) => {
         clearTimeout(timeout)
-        perfLog("read", readStart, key)
         const callbacks = pendingReads.get(key) || []
         pendingReads.delete(key)
         callbacks.forEach(callback => callback(err, result))
@@ -184,7 +174,6 @@ const Radisk = (opt: RadiskOptions) => {
       return
     }
 
-    const thrashStart = Date.now()
     clearTimeout(radisk.batch.timeout)
     radisk.thrash.more = false
     radisk.thrash.ing = true
@@ -196,7 +185,6 @@ const Radisk = (opt: RadiskOptions) => {
     radisk.save(batch, err => {
       if (++i > 1) return
 
-      perfLog("thrash", thrashStart, `batch-${batch.ed}`)
       if (err) options.log(err)
       batch.acks.forEach(cb => cb(err))
       radisk.thrash.at = undefined
@@ -337,7 +325,6 @@ const Radisk = (opt: RadiskOptions) => {
       },
     }
     Radix.map(rad, write.each, true)
-    const writeStart = Date.now()
     store.put(file, write.text, err => {
       // If a split occurred the cached radix tree still contains entries that
       // were moved to the sub-file. Invalidate so the next save.mix re-reads
@@ -346,7 +333,6 @@ const Radisk = (opt: RadiskOptions) => {
         cache.delete(file)
         fileListCache = null
       }
-      perfLog("file-write", writeStart, file, write.text.length)
       cb(err)
     })
   }
