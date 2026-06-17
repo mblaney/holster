@@ -223,4 +223,3 @@ const Names = (): string[] => {
 }
 
 export default Names
-

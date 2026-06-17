@@ -5,7 +5,14 @@
 
 import SeaArray from "./array.ts"
 
-type Encoding = "utf8" | "utf-8" | "hex" | "base64" | "binary" | "latin1" | "ascii"
+type Encoding =
+  | "utf8"
+  | "utf-8"
+  | "hex"
+  | "base64"
+  | "binary"
+  | "latin1"
+  | "ascii"
 
 // Security constants
 const SECURITY_LIMITS = {
@@ -44,15 +51,18 @@ SafeBuffer.prototype = Object.create(Array.prototype)
 const validateStringInput = (input: string, _encoding: Encoding): void => {
   if (input.length > SECURITY_LIMITS.MAX_STRING_LENGTH) {
     throw new RangeError(
-      `String too large: ${input.length} > ${SECURITY_LIMITS.MAX_STRING_LENGTH}`
+      `String too large: ${input.length} > ${SECURITY_LIMITS.MAX_STRING_LENGTH}`,
     )
   }
 }
 
-const validateBufferSize = (size: number, operation = "buffer operation"): void => {
+const validateBufferSize = (
+  size: number,
+  operation = "buffer operation",
+): void => {
   if (size > SECURITY_LIMITS.MAX_BUFFER_SIZE) {
     throw new RangeError(
-      `Buffer size too large for ${operation}: ${size} > ${SECURITY_LIMITS.MAX_BUFFER_SIZE}`
+      `Buffer size too large for ${operation}: ${size} > ${SECURITY_LIMITS.MAX_BUFFER_SIZE}`,
     )
   }
 }
@@ -97,7 +107,9 @@ const encodeUtf8String = (str: string): Uint8Array => {
     validateBufferSize(bytes.length, "UTF-8 encoding")
     return bytes
   } catch (err) {
-    throw new TypeError(`Failed to encode UTF-8 string: ${(err as Error).message}`)
+    throw new TypeError(
+      `Failed to encode UTF-8 string: ${(err as Error).message}`,
+    )
   }
 }
 
@@ -110,7 +122,7 @@ const encodeBinaryString = (str: string): Uint8Array => {
     const charCode = str.charCodeAt(i)
     if (charCode > 255) {
       throw new TypeError(
-        `Invalid binary string: character at position ${i} exceeds byte range (${charCode} > 255)`
+        `Invalid binary string: character at position ${i} exceeds byte range (${charCode} > 255)`,
       )
     }
     bytes[i] = charCode
@@ -137,7 +149,9 @@ const parseBase64String = (base64String: string): Uint8Array => {
     }
     return bytes
   } catch (err) {
-    throw new TypeError(`Failed to decode base64 string: ${(err as Error).message}`)
+    throw new TypeError(
+      `Failed to decode base64 string: ${(err as Error).message}`,
+    )
   }
 }
 
@@ -164,7 +178,7 @@ const processArrayLikeInput = (input: unknown): Uint8Array => {
         !Number.isInteger(val)
       ) {
         throw new TypeError(
-          `Invalid byte value at index ${i}: ${val} (must be integer 0-255)`
+          `Invalid byte value at index ${i}: ${val} (must be integer 0-255)`,
         )
       }
     }
@@ -175,9 +189,12 @@ const processArrayLikeInput = (input: unknown): Uint8Array => {
     typeof input === "object" &&
     input !== null &&
     "byteLength" in input &&
-    typeof (input as { byteLength: unknown }).byteLength === "number"
+    typeof (input as {byteLength: unknown}).byteLength === "number"
   ) {
-    validateBufferSize((input as { byteLength: number }).byteLength, "ArrayBuffer-like processing")
+    validateBufferSize(
+      (input as {byteLength: number}).byteLength,
+      "ArrayBuffer-like processing",
+    )
     return new Uint8Array(input as ArrayBuffer)
   }
 
@@ -185,7 +202,7 @@ const processArrayLikeInput = (input: unknown): Uint8Array => {
     typeof input === "object" &&
     input !== null &&
     "length" in input &&
-    typeof (input as { length: unknown }).length === "number"
+    typeof (input as {length: unknown}).length === "number"
   ) {
     const arrayLike = input as ArrayLike<unknown>
     validateBufferSize(arrayLike.length, "array-like processing")
@@ -200,7 +217,7 @@ const processArrayLikeInput = (input: unknown): Uint8Array => {
         !Number.isInteger(val)
       ) {
         throw new TypeError(
-          `Invalid byte value at index ${i}: ${val} (must be integer 0-255)`
+          `Invalid byte value at index ${i}: ${val} (must be integer 0-255)`,
         )
       }
     }
@@ -257,7 +274,7 @@ Object.assign(SafeBuffer, {
           for (let i = 0; i < input.length; i++) {
             if (input.charCodeAt(i) > 127) {
               throw new TypeError(
-                `Invalid ASCII character at position ${i}: ${input.charCodeAt(i)} > 127`
+                `Invalid ASCII character at position ${i}: ${input.charCodeAt(i)} > 127`,
               )
             }
           }
@@ -342,7 +359,7 @@ Object.assign(SafeBuffer, {
         bytes = processArrayLikeInput(item)
       } catch (err) {
         throw new TypeError(
-          `Invalid array element at index ${i}: ${(err as Error).message}`
+          `Invalid array element at index ${i}: ${(err as Error).message}`,
         )
       }
 
@@ -362,7 +379,9 @@ Object.assign(SafeBuffer, {
 
       return SeaArray.from(result)
     } catch (err) {
-      throw new Error(`Failed to concatenate buffers: ${(err as Error).message}`)
+      throw new Error(
+        `Failed to concatenate buffers: ${(err as Error).message}`,
+      )
     }
   },
 
@@ -371,7 +390,7 @@ Object.assign(SafeBuffer, {
       obj instanceof SeaArray ||
       (obj !== null &&
         typeof obj === "object" &&
-        (obj as { constructor?: unknown }).constructor === SafeBuffer)
+        (obj as {constructor?: unknown}).constructor === SafeBuffer)
     )
   },
 
@@ -411,7 +430,7 @@ SafeBuffer.prototype.toString = function (
   this: SeaArray,
   encoding: Encoding = "utf8",
   start = 0,
-  end = this.length
+  end = this.length,
 ): string {
   if (typeof encoding !== "string") {
     throw new TypeError("Encoding must be a string")
@@ -430,12 +449,13 @@ SafeBuffer.prototype.toString = function (
       this,
       encoding as "utf8" | "hex" | "base64",
       start,
-      end
+      end,
     )
   } catch (err) {
-    throw new Error(`Failed to convert buffer to string: ${(err as Error).message}`)
+    throw new Error(
+      `Failed to convert buffer to string: ${(err as Error).message}`,
+    )
   }
 }
 
 export default SafeBuffer
-

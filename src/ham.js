@@ -35,7 +35,14 @@ const Ham = (state, currentState, value, currentValue, signed = false) => {
   return {incoming: true}
 }
 
-Ham.mix = async (change, graph, hasNode, secure, listen) => {
+Ham.mix = async (
+  change,
+  graph,
+  hasNode,
+  secure,
+  listen,
+  maxGraphSize = MAX_GRAPH_SIZE,
+) => {
   if (!change || typeof change !== "object") {
     throw new TypeError("change must be an object")
   }
@@ -216,7 +223,7 @@ Ham.mix = async (change, graph, hasNode, secure, listen) => {
   }
 
   const souls = Object.keys(graph)
-  if (souls.length > MAX_GRAPH_SIZE) {
+  if (souls.length > maxGraphSize) {
     // Sort by oldest state timestamp and remove oldest entries
     const soulsByAge = souls
       .map(soul => {
@@ -225,7 +232,7 @@ Ham.mix = async (change, graph, hasNode, secure, listen) => {
         return {soul, maxState}
       })
       .sort((a, b) => a.maxState - b.maxState)
-    const remove = soulsByAge.slice(0, souls.length - MAX_GRAPH_SIZE)
+    const remove = soulsByAge.slice(0, souls.length - maxGraphSize)
     remove.forEach(({soul}) => {
       delete graph[soul]
       if (hasNode) hasNode.delete(soul)

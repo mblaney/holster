@@ -1,7 +1,7 @@
-import { describe, test } from "node:test"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import SEA from "../src/sea.ts"
-import type { UserPair, EncryptedData, SignedData } from "../src/schemas.ts"
+import type {UserPair, EncryptedData, SignedData} from "../src/schemas.ts"
 
 // The JWK format uses "base64url" encoding, which means "+" replaced with "-"
 // and "/" with "_" and removing "=" padding. So public and private keys here
@@ -69,18 +69,18 @@ describe("SEA", () => {
   test("encrypt and decrypt object await", (t, done) => {
     ;(async (): Promise<void> => {
       const pair: UserPair = await SEA.pair()
-      const enc = await SEA.encrypt({ test: "hello self" }, pair)
+      const enc = await SEA.encrypt({test: "hello self"}, pair)
       const dec = await SEA.decrypt(enc!, pair)
-      assert.deepEqual(dec, { test: "hello self" })
+      assert.deepEqual(dec, {test: "hello self"})
       done()
     })()
   })
 
   test("encrypt and decrypt object callback", (t, done) => {
     SEA.pair((pair: UserPair) => {
-      SEA.encrypt({ test: "hello self" }, pair, (enc: EncryptedData | null) => {
+      SEA.encrypt({test: "hello self"}, pair, (enc: EncryptedData | null) => {
         SEA.decrypt(enc, pair, (dec: unknown) => {
-          assert.deepEqual(dec, { test: "hello self" })
+          assert.deepEqual(dec, {test: "hello self"})
           done()
         })
       })
@@ -123,18 +123,18 @@ describe("SEA", () => {
   test("sign and verify object await", (t, done) => {
     ;(async (): Promise<void> => {
       const pair: UserPair = await SEA.pair()
-      const signed = await SEA.sign({ test: "hello self" }, pair)
+      const signed = await SEA.sign({test: "hello self"}, pair)
       const verified = await SEA.verify(signed!, pair)
-      assert.deepEqual(verified, { test: "hello self" })
+      assert.deepEqual(verified, {test: "hello self"})
       done()
     })()
   })
 
   test("sign and verify object callback", (t, done) => {
     SEA.pair((pair: UserPair) => {
-      SEA.sign({ test: "hello self" }, pair, (signed: SignedData | null) => {
+      SEA.sign({test: "hello self"}, pair, (signed: SignedData | null) => {
         SEA.verify(signed!, pair, (verified: unknown) => {
-          assert.deepEqual(verified, { test: "hello self" })
+          assert.deepEqual(verified, {test: "hello self"})
           done()
         })
       })
@@ -164,9 +164,9 @@ describe("SEA", () => {
 
   test("work with salt encrypt object callback", (t, done) => {
     SEA.work("hello", "salt", work => {
-      SEA.encrypt({ test: "hello work" }, work, (enc: EncryptedData | null) => {
+      SEA.encrypt({test: "hello work"}, work, (enc: EncryptedData | null) => {
         SEA.decrypt(enc, work, (dec: unknown) => {
-          assert.deepEqual(dec, { test: "hello work" })
+          assert.deepEqual(dec, {test: "hello work"})
           done()
         })
       })
@@ -176,9 +176,9 @@ describe("SEA", () => {
   test("work with salt encrypt object await", (t, done) => {
     ;(async (): Promise<void> => {
       const work = await SEA.work("hello", "salt")
-      const enc = await SEA.encrypt({ test: "hello work" }, work)
+      const enc = await SEA.encrypt({test: "hello work"}, work)
       const dec = await SEA.decrypt(enc!, work)
-      assert.deepEqual(dec, { test: "hello work" })
+      assert.deepEqual(dec, {test: "hello work"})
       done()
     })()
   })
@@ -206,9 +206,9 @@ describe("SEA", () => {
 
   test("work no salt encrypt object callback", (t, done) => {
     SEA.work("hello", work => {
-      SEA.encrypt({ test: "hello work" }, work, (enc: EncryptedData | null) => {
+      SEA.encrypt({test: "hello work"}, work, (enc: EncryptedData | null) => {
         SEA.decrypt(enc, work, (dec: unknown) => {
-          assert.deepEqual(dec, { test: "hello work" })
+          assert.deepEqual(dec, {test: "hello work"})
           done()
         })
       })
@@ -218,9 +218,9 @@ describe("SEA", () => {
   test("work no salt encrypt object await", (t, done) => {
     ;(async (): Promise<void> => {
       const work = await SEA.work("hello")
-      const enc = await SEA.encrypt({ test: "hello work" }, work)
+      const enc = await SEA.encrypt({test: "hello work"}, work)
       const dec = await SEA.decrypt(enc!, work)
-      assert.deepEqual(dec, { test: "hello work" })
+      assert.deepEqual(dec, {test: "hello work"})
       done()
     })()
   })
@@ -259,14 +259,18 @@ describe("SEA", () => {
     SEA.pair((alice: UserPair) => {
       SEA.pair((bob: UserPair) => {
         SEA.secret(bob, alice, to => {
-          SEA.encrypt({ test: "shared data" }, to, (enc: EncryptedData | null) => {
-            SEA.secret(alice, bob, from => {
-              SEA.decrypt(enc, from, (dec: unknown) => {
-                assert.deepEqual(dec, { test: "shared data" })
-                done()
+          SEA.encrypt(
+            {test: "shared data"},
+            to,
+            (enc: EncryptedData | null) => {
+              SEA.secret(alice, bob, from => {
+                SEA.decrypt(enc, from, (dec: unknown) => {
+                  assert.deepEqual(dec, {test: "shared data"})
+                  done()
+                })
               })
-            })
-          })
+            },
+          )
         })
       })
     })
@@ -277,12 +281,11 @@ describe("SEA", () => {
       const alice: UserPair = await SEA.pair()
       const bob: UserPair = await SEA.pair()
       const to = await SEA.secret(bob, alice)
-      const enc = await SEA.encrypt({ test: "shared data" }, to)
+      const enc = await SEA.encrypt({test: "shared data"}, to)
       const from = await SEA.secret(alice, bob)
       const dec = await SEA.decrypt(enc!, from)
-      assert.deepEqual(dec, { test: "shared data" })
+      assert.deepEqual(dec, {test: "shared data"})
       done()
     })()
   })
 })
-

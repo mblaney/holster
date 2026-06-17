@@ -42,8 +42,14 @@ describe("hybrid split depth cap", () => {
 
     setTimeout(() => {
       assert.deepEqual(Object.keys(puts).sort(), ["!", "Fb"])
-      assert.ok(!puts["!"].includes("b" + enq), "root file must not contain Fb entries")
-      assert.ok(puts["Fb"].includes("b" + enq), "Fb file must contain Fb entries")
+      assert.ok(
+        !puts["!"].includes("b" + enq),
+        "root file must not contain Fb entries",
+      )
+      assert.ok(
+        puts["Fb"].includes("b" + enq),
+        "Fb file must contain Fb entries",
+      )
       done()
     }, 10)
   })
@@ -73,7 +79,11 @@ describe("hybrid split depth cap", () => {
 
     setTimeout(() => {
       const extra = Object.keys(puts).filter(f => f !== "!" && f !== "Fb")
-      assert.deepEqual(extra, [], "no files deeper than the per-soul file must be created")
+      assert.deepEqual(
+        extra,
+        [],
+        "no files deeper than the per-soul file must be created",
+      )
       done()
     }, 10)
   })

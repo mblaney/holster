@@ -1,13 +1,16 @@
 import fs from "fs"
-import { Server} from "mock-socket"
-import { describe, test} from "node:test"
+import {Server} from "mock-socket"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Holster from "../../src/holster.ts"
-import type { HolsterAPI } from "../../src/holster.ts"
+import type {HolsterAPI} from "../../src/holster.ts"
 
 describe("system - chained get with on", () => {
   const wss: Server = new Server("ws://localhost:9002")
-  const holster: HolsterAPI = Holster({file: "test/system/chained-on", wss: wss})
+  const holster: HolsterAPI = Holster({
+    file: "test/system/chained-on",
+    wss: wss,
+  })
 
   test("on listener fires with null when no data exists", (t, done) => {
     holster.get("key").on(data => {
@@ -26,7 +29,7 @@ describe("system - chained get with on", () => {
       setTimeout(() => {
         holster.get("key2").on(data => {
           assert.notEqual(data, null)
-          assert.equal((data as { value: string }).value, "test")
+          assert.equal((data as {value: string}).value, "test")
           done()
         }, true)
       }, 50)

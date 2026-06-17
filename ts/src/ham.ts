@@ -31,17 +31,17 @@ const Ham = (
   currentState: Timestamp,
   value: GraphValue,
   currentValue: GraphValue,
-  signed = false
+  signed = false,
 ): HamResult => {
-  if (state < currentState) return { historical: true }
+  if (state < currentState) return {historical: true}
 
-  if (state > currentState) return { incoming: true }
+  if (state > currentState) return {incoming: true}
 
   // state is equal to currentState. Old data is expected to propagate through
   // the network, but conflicting values with same signed timestamp are ignored
   // since the owner can only create one value per timestamp.
   if (signed && value !== currentValue) {
-    return { historical: true }
+    return {historical: true}
   }
 
   // Lexically compare to resolve conflict (for unsigned or matching values)
@@ -52,13 +52,13 @@ const Ham = (
       : currentValue
 
   // No update required
-  if (valueStr === currentValueStr) return { state: true }
+  if (valueStr === currentValueStr) return {state: true}
 
   // Keep the current value
-  if (valueStr < currentValueStr) return { current: true }
+  if (valueStr < currentValueStr) return {current: true}
 
   // Otherwise update using the incoming value
-  return { incoming: true }
+  return {incoming: true}
 }
 
 /**
@@ -69,7 +69,8 @@ Ham.mix = async (
   graph: Graph,
   hasNode: Set<string> | undefined,
   secure: boolean,
-  listen: ListenMap
+  listen: ListenMap,
+  maxGraphSize = MAX_GRAPH_SIZE,
 ): Promise<HamMixResult> => {
   if (!change || typeof change !== "object") {
     throw new TypeError("change must be an object")
@@ -137,7 +138,9 @@ Ham.mix = async (
             propsForTimestamp.length > 0 &&
             propsForTimestamp.every(([prop]) => {
               const graphState =
-                graph[soul] && graph[soul]!._[">"] ? graph[soul]!._[">"][prop] : 0
+                graph[soul] && graph[soul]!._[">"]
+                  ? graph[soul]!._[">"][prop]
+                  : 0
               return graphState !== undefined && graphState > asNumber
             })
 
@@ -145,7 +148,11 @@ Ham.mix = async (
             continue
           }
 
-          const isValid = await SEA.verifyTimestamp(asNumber, sig as string, pub)
+          const isValid = await SEA.verifyTimestamp(
+            asNumber,
+            sig as string,
+            pub,
+          )
           if (isValid) {
             signedTimestamps.add(asNumber)
             for (const [prop, ts] of incomingTimestamps) {
@@ -175,7 +182,7 @@ Ham.mix = async (
       const value = node[key]!
       const state = (node._ && node._[">"] ? node._[">"][key] : 0) || 0
       const currentValue = graph[soul] ? graph[soul][key] : undefined
-      const currentState = graph[soul] ? (graph[soul]._[">"][key] || 0) : 0
+      const currentState = graph[soul] ? graph[soul]._[">"][key] || 0 : 0
 
       if (alias && key !== utils.rel.is(value)) {
         console.log(`error alias ${alias}: ${key} !== ${utils.rel.is(value)}`)
@@ -190,7 +197,9 @@ Ham.mix = async (
         if (!defer[soul]) {
           const stateVector: Record<string, number> = {}
           const signatures: Record<string, string> | undefined = {}
-          defer[soul] = { _: { "#": soul, ">": stateVector, s: signatures } } as GraphNode
+          defer[soul] = {
+            _: {"#": soul, ">": stateVector, s: signatures},
+          } as GraphNode
         }
         defer[soul]![key] = value
         defer[soul]!._[">"][key] = state
@@ -200,28 +209,39 @@ Ham.mix = async (
       } else {
         const isSigned =
           validTimestamps.has(soul) && validTimestamps.get(soul)!.has(state)
-        const result = Ham(state, currentState, value, currentValue ?? null, isSigned)
+        const result = Ham(
+          state,
+          currentState,
+          value,
+          currentValue ?? null,
+          isSigned,
+        )
         if (result.incoming) {
           if (!now[soul]) {
             const stateVector1: Record<string, number> = {}
             const signatures1: Record<string, string> | undefined = {}
-            now[soul] = { _: { "#": soul, ">": stateVector1, s: signatures1 } } as GraphNode
+            now[soul] = {
+              _: {"#": soul, ">": stateVector1, s: signatures1},
+            } as GraphNode
           }
           if (!graph[soul]) {
             const stateVector2: Record<string, number> = {}
             const signatures2: Record<string, string> | undefined = {}
-            graph[soul] = { _: { "#": soul, ">": stateVector2, s: signatures2 } } as GraphNode
+            graph[soul] = {
+              _: {"#": soul, ">": stateVector2, s: signatures2},
+            } as GraphNode
           }
           graph[soul]![key] = now[soul]![key] = value
           graph[soul]!._[">"][key] = now[soul]!._[">"][key] = state
           if (node._["s"] && node._["s"][state]) {
-            graph[soul]!._["s"]![state] = now[soul]!._["s"]![state] = node._["s"][state]
+            graph[soul]!._["s"]![state] = now[soul]!._["s"]![state] =
+              node._["s"][state]
           }
 
           if (listen[soul]) {
-            listen[soul]!
-              .filter(l => utils.match(l["."], key))
-              .forEach(l => listeners.push(l.cb as () => void))
+            listen[soul]!.filter(l => utils.match(l["."], key)).forEach(l =>
+              listeners.push(l.cb as () => void),
+            )
           }
           updated = true
         }
@@ -229,30 +249,29 @@ Ham.mix = async (
     }
 
     if (updated && listen[soul]) {
-      listen[soul]!
-        .filter(l => utils.match(l["."]))
-        .forEach(l => listeners.push(l.cb as () => void))
+      listen[soul]!.filter(l => utils.match(l["."])).forEach(l =>
+        listeners.push(l.cb as () => void),
+      )
     }
   }
 
   const souls = Object.keys(graph)
-  if (souls.length > MAX_GRAPH_SIZE) {
+  if (souls.length > maxGraphSize) {
     const soulsByAge = souls
       .map(soul => {
         const states = graph[soul]!._ && graph[soul]!._[">"]
         const maxState = states ? Math.max(...Object.values(states)) : 0
-        return { soul, maxState }
+        return {soul, maxState}
       })
       .sort((a, b) => a.maxState - b.maxState)
-    const remove = soulsByAge.slice(0, souls.length - MAX_GRAPH_SIZE)
-    remove.forEach(({ soul }) => {
+    const remove = soulsByAge.slice(0, souls.length - maxGraphSize)
+    remove.forEach(({soul}) => {
       delete graph[soul]
       if (hasNode) hasNode.delete(soul)
     })
   }
 
-  return { now, defer, wait, listeners }
+  return {now, defer, wait, listeners}
 }
 
 export default Ham
-

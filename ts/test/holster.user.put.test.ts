@@ -1,9 +1,9 @@
 import fs from "fs"
-import { Server } from "mock-socket"
+import {Server} from "mock-socket"
 import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Holster from "../src/holster.ts"
-import type { HolsterAPI } from "../src/holster.ts"
+import type {HolsterAPI} from "../src/holster.ts"
 
 describe("holster.user.put", () => {
   const wss: Server = new Server("ws://localhost:1234")
@@ -320,14 +320,19 @@ describe("holster.user.put", () => {
 
       setTimeout(() => {
         user.get("set", data => {
-          assert.equal(Object.values(data as Record<string, unknown>)[0], "first")
+          assert.equal(
+            Object.values(data as Record<string, unknown>)[0],
+            "first",
+          )
 
           user.get("set").put("second", true, err => {
             assert.equal(err, null)
 
             setTimeout(() => {
               user.get("set", data => {
-                for (const value of Object.values(data as Record<string, unknown>)) {
+                for (const value of Object.values(
+                  data as Record<string, unknown>,
+                )) {
                   assert.ok(value === "first" || value === "second")
                 }
                 done()
@@ -353,18 +358,23 @@ describe("holster.user.put", () => {
 
       setTimeout(() => {
         user.get("set2", data => {
-          assert.deepEqual(Object.values(data as Record<string, unknown>)[0], set1)
+          assert.deepEqual(
+            Object.values(data as Record<string, unknown>)[0],
+            set1,
+          )
 
           user.get("set2").put(set2, true, err => {
             assert.equal(err, null)
 
             setTimeout(() => {
               user.get("set2", data => {
-                for (const value of Object.values(data as Record<string, unknown>)) {
-                  if ((value as { key: string }).key === "value 1") {
+                for (const value of Object.values(
+                  data as Record<string, unknown>,
+                )) {
+                  if ((value as {key: string}).key === "value 1") {
                     assert.deepEqual(value, set1)
                   }
-                  if ((value as { key: string }).key === "value 2") {
+                  if ((value as {key: string}).key === "value 2") {
                     assert.deepEqual(value, set2)
                   }
                 }

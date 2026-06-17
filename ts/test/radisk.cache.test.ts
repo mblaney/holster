@@ -1,7 +1,11 @@
-import { describe, test } from "node:test"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Radisk from "../src/radisk.ts"
-import type { RadiskInterface, RadiskOptions, EncodedValue } from "../src/schemas.ts"
+import type {
+  RadiskInterface,
+  RadiskOptions,
+  EncodedValue,
+} from "../src/schemas.ts"
 
 describe("radisk with cache", () => {
   const puts: Record<string, string> = {}
@@ -14,7 +18,11 @@ describe("radisk with cache", () => {
       get: (file: string, cb: (err?: string, data?: EncodedValue) => void) => {
         cb(undefined, puts[file] as unknown as EncodedValue | undefined)
       },
-      put: (file: string, data: string | EncodedValue | Record<string, unknown>, cb: (err?: string) => void) => {
+      put: (
+        file: string,
+        data: string | EncodedValue | Record<string, unknown>,
+        cb: (err?: string) => void,
+      ) => {
         puts[file] = data as unknown as string
         cb(undefined)
       },
@@ -93,7 +101,7 @@ describe("radisk with cache", () => {
   })
 
   test("write and read a soul relation with state and cache", (t, done) => {
-    const rel: [{ "#": string }, number] = [{"#": "soul"}, 1234]
+    const rel: [{"#": string}, number] = [{"#": "soul"}, 1234]
     radisk("key", rel)
     setTimeout(() => {
       radisk("key", (err, value) => {

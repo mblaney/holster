@@ -18,9 +18,7 @@ import type {
 const isNode = typeof process !== "undefined" && process.versions?.node != null
 
 // Dynamic import for Node.js fs module - won't execute in browser/service worker
-const fs = isNode
-  ? await import(/*webpackIgnore: true*/ "node:fs")
-  : undefined
+const fs = isNode ? await import(/*webpackIgnore: true*/ "node:fs") : undefined
 
 // ASCII character for enquiry
 const enq = String.fromCharCode(5)
@@ -41,39 +39,49 @@ const fileSystem = (opt: StoreOptions): FileSystemInterface => {
 
     return {
       get: (file, cb) => {
-        fs!.readFile(dir + "/" + file, (err: NodeJS.ErrnoException | null, data?: Buffer) => {
-          if (err) {
-            if ((err as { code?: string }).code === "ENOENT") {
-              cb()
-              return
+        fs!.readFile(
+          dir + "/" + file,
+          (err: NodeJS.ErrnoException | null, data?: Buffer) => {
+            if (err) {
+              if ((err as {code?: string}).code === "ENOENT") {
+                cb()
+                return
+              }
+              console.log("fs.readFile error:", err)
             }
-            console.log("fs.readFile error:", err)
-          }
-          const dataStr = data ? data.toString() : undefined
-          cb(err as never, dataStr)
-        })
+            const dataStr = data ? data.toString() : undefined
+            cb(err as never, dataStr)
+          },
+        )
       },
       put: (file, data, cb) => {
         const tmp = file + "." + utils.text.random(9) + ".tmp"
-        fs!.writeFile(tmp, data as string, (err: NodeJS.ErrnoException | null) => {
-          if (err) {
-            console.log("fs.writeFile error:", err)
-            cb(err as never)
-            return
-          }
-          fs!.rename(tmp, dir + "/" + file, cb as never)
-        })
+        fs!.writeFile(
+          tmp,
+          data as string,
+          (err: NodeJS.ErrnoException | null) => {
+            if (err) {
+              console.log("fs.writeFile error:", err)
+              cb(err as never)
+              return
+            }
+            fs!.rename(tmp, dir + "/" + file, cb as never)
+          },
+        )
       },
       list: cb => {
-        fs!.readdir(dir, (err: NodeJS.ErrnoException | null, files?: string[]) => {
-          if (err) {
-            console.log("fs.readdir error:", err)
+        fs!.readdir(
+          dir,
+          (err: NodeJS.ErrnoException | null, files?: string[]) => {
+            if (err) {
+              console.log("fs.readdir error:", err)
+              cb()
+              return
+            }
+            if (files) files.forEach(cb)
             cb()
-            return
-          }
-          if (files) files.forEach(cb)
-          cb()
-        })
+          },
+        )
       },
     }
   }
@@ -122,7 +130,10 @@ const fileSystem = (opt: StoreOptions): FileSystemInterface => {
 
     return {
       get: (file, cb) => {
-        const _get = (file: string, cb: (err?: string | null, data?: string) => void) => {
+        const _get = (
+          file: string,
+          cb: (err?: string | null, data?: string) => void,
+        ) => {
           const tx = db.transaction([dir], "readonly")
           const req = tx.objectStore(dir).get(file)
           req.onerror = () => {
@@ -146,7 +157,7 @@ const fileSystem = (opt: StoreOptions): FileSystemInterface => {
         const _put = (
           file: string,
           data: string,
-          cb: (err?: string | null) => void
+          cb: (err?: string | null) => void,
         ) => {
           const tx = db.transaction([dir], "readwrite")
           const req = tx.objectStore(dir).put(data, file)
@@ -209,10 +220,7 @@ const fileSystem = (opt: StoreOptions): FileSystemInterface => {
 }
 
 export interface StoreInterface {
-  get: (
-    lex: Lex,
-    cb: (err?: string | null, graph?: Graph) => void,
-  ) => void
+  get: (lex: Lex, cb: (err?: string | null, graph?: Graph) => void) => void
   put: (graph: Graph, cb: (err?: string | null) => void) => void
 }
 
@@ -244,7 +252,7 @@ const Store = (opt?: StoreOptions): StoreInterface => {
       const each = (value: EncodedValue, k: string): void => {
         if (k !== utils.userPublicKey && !utils.match(lex["."], k)) return
 
-        if (!node) node = { _: { "#": soul, ">": {} } }
+        if (!node) node = {_: {"#": soul, ">": {}}}
         node[k] = value[0]
         node._[">"][k] = value[1]
         // If signature is present, store it in _["s"]
@@ -262,7 +270,7 @@ const Store = (opt?: StoreOptions): StoreInterface => {
       const finish = (err: string | null | undefined): void => {
         if (err && !cbErr) cbErr = err
         if (--pending > 0) return
-        const graph: Graph = { [soul]: node! }
+        const graph: Graph = {[soul]: node!}
         if (node && Object.keys(signatures).length > 0) {
           node._["s"] = signatures
         }
@@ -281,7 +289,8 @@ const Store = (opt?: StoreOptions): StoreInterface => {
 
       if (needsPubKey) {
         radisk(soul + enq + utils.userPublicKey, (err, value) => {
-          if (value && !utils.obj.is(value)) each(value as EncodedValue, utils.userPublicKey)
+          if (value && !utils.obj.is(value))
+            each(value as EncodedValue, utils.userPublicKey)
           finish(err)
         })
       }
@@ -319,9 +328,7 @@ const Store = (opt?: StoreOptions): StoreInterface => {
           const value = node[key]!
           const state = node._[">"][key]!
           const sig = node._["s"] && node._["s"][state]
-          const data: EncodedValue = sig
-            ? [value, state, sig]
-            : [value, state]
+          const data: EncodedValue = sig ? [value, state, sig] : [value, state]
           radisk(soul + enq + key, data, ack)
         })
       })
@@ -330,4 +337,3 @@ const Store = (opt?: StoreOptions): StoreInterface => {
 }
 
 export default Store
-

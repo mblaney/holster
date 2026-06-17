@@ -48,10 +48,14 @@ describe("split file with shared prefix", () => {
       assert.deepEqual(puts, {
         "!":
           '\x1F+0\x1F#\x1F"F\x1F\n' +
-          '\x1F+1\x1F#\x1F"a\x05x\x1F=\x1F"' + long + '\x031000\x1F\n',
-        "Fb":
+          '\x1F+1\x1F#\x1F"a\x05x\x1F=\x1F"' +
+          long +
+          "\x031000\x1F\n",
+        Fb:
           '\x1F+0\x1F#\x1F"F\x1F\n' +
-          '\x1F+1\x1F#\x1F"b\x05x\x1F=\x1F"' + long + '\x031000\x1F\n' +
+          '\x1F+1\x1F#\x1F"b\x05x\x1F=\x1F"' +
+          long +
+          "\x031000\x1F\n" +
           '\x1F+1\x1F#\x1F"c\x05x\x1F=\x1F"short\x031000\x1F\n',
       })
       done()
@@ -60,7 +64,9 @@ describe("split file with shared prefix", () => {
 
   test("reads back correctly after split", (t, done) => {
     let count = 0
-    const check = () => { if (++count === 3) done() }
+    const check = () => {
+      if (++count === 3) done()
+    }
     radisk("Fa" + enq + "x", (err, value) => {
       assert.deepEqual(value, [long, now])
       check()

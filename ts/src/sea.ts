@@ -3,14 +3,10 @@
  * Cryptographic functions for signing, verification, encryption, and decryption
  */
 
-import { userPublicKey, userSignature } from "./utils.ts"
+import {userPublicKey, userSignature} from "./utils.ts"
 import * as utils from "./sea-utils.ts"
 import SafeBuffer from "./buffer.ts"
-import type {
-  UserPair,
-  EncryptedData,
-  SignedData,
-} from "./schemas.ts"
+import type {UserPair, EncryptedData, SignedData} from "./schemas.ts"
 
 type Callback<T> = (result: T) => void
 
@@ -24,7 +20,7 @@ const SEA = {
   pair: async (cb?: Callback<UserPair>): Promise<UserPair> => {
     // ECDSA keys for signing/verifying
     const ecdsa = await utils.subtle
-      .generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+      .generateKey({name: "ECDSA", namedCurve: "P-256"}, true, [
         "sign",
         "verify",
       ])
@@ -38,7 +34,7 @@ const SEA = {
 
     // ECDH keys for encryption/decryption
     const ecdh = await utils.subtle
-      .generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey"])
+      .generateKey({name: "ECDH", namedCurve: "P-256"}, true, ["deriveKey"])
       .then(async keys => {
         const pub = await utils.subtle.exportKey("jwk", keys.publicKey)
         return {
@@ -63,14 +59,14 @@ const SEA = {
   encrypt: async (
     data: unknown,
     pair: Partial<UserPair> | null,
-    cb?: Callback<EncryptedData | null>
+    cb?: Callback<EncryptedData | null>,
   ): Promise<EncryptedData | null> => {
     if (!pair || !pair.epriv) {
       if (cb) cb(null)
       return null
     }
 
-    const rand = { s: utils.random(9), iv: utils.random(15) }
+    const rand = {s: utils.random(9), iv: utils.random(15)}
     const ct = await utils.aeskey(pair.epriv, rand.s).then(aes => {
       return utils.subtle.encrypt(
         {
@@ -78,7 +74,7 @@ const SEA = {
           iv: new Uint8Array(rand.iv),
         },
         aes,
-        new TextEncoder().encode(utils.stringify(data))
+        new TextEncoder().encode(utils.stringify(data)),
       )
     })
     const enc: EncryptedData = {
@@ -96,7 +92,7 @@ const SEA = {
   decrypt: async (
     enc: Partial<EncryptedData> | null,
     pair: Partial<UserPair> | null,
-    cb?: Callback<unknown | null>
+    cb?: Callback<unknown | null>,
   ): Promise<unknown | null> => {
     if (!enc || !enc.ct || !enc.iv || !enc.s || !pair || !pair.epriv) {
       if (cb) cb(null)
@@ -117,7 +113,7 @@ const SEA = {
             tagLength: 128,
           },
           aes,
-          new Uint8Array(data.ct)
+          new Uint8Array(data.ct),
         )
       })
       const dec = utils.parse(new TextDecoder("utf8").decode(ct))
@@ -136,7 +132,7 @@ const SEA = {
   verify: async (
     data: string | SignedData,
     pair: Partial<UserPair> | null,
-    cb?: Callback<unknown | null>
+    cb?: Callback<unknown | null>,
   ): Promise<unknown | null> => {
     if (!pair || !pair.pub) {
       if (cb) cb(null)
@@ -149,9 +145,9 @@ const SEA = {
     const key = await utils.subtle.importKey(
       "jwk",
       utils.jwk(pair.pub),
-      { name: "ECDSA", namedCurve: "P-256" },
+      {name: "ECDSA", namedCurve: "P-256"},
       false,
-      ["verify"]
+      ["verify"],
     )
 
     let msg: string | Record<string, unknown> = {}
@@ -162,13 +158,13 @@ const SEA = {
       // (which should not be part of signature, so not verified)
       for (const k of Object.keys(signed.m).sort()) {
         if (k !== "_" && k !== userPublicKey && k !== userSignature) {
-          (msg as Record<string, unknown>)[k] = signed.m[k]
+          ;(msg as Record<string, unknown>)[k] = signed.m[k]
         }
       }
     }
     const hash = await utils.sha256(msg)
     const sig = new Uint8Array(SafeBuffer.from(signed.s, "base64"))
-    const alg = { name: "ECDSA", hash: { name: "SHA-256" } }
+    const alg = {name: "ECDSA", hash: {name: "SHA-256"}}
     if (await utils.subtle.verify(alg, key, sig, new Uint8Array(hash))) {
       const verified = utils.parse(signed.m as string)
       if (cb) cb(verified)
@@ -185,7 +181,7 @@ const SEA = {
   sign: async (
     data: string | Record<string, unknown>,
     pair: Partial<UserPair> | null,
-    cb?: Callback<SignedData | null>
+    cb?: Callback<SignedData | null>,
   ): Promise<SignedData | null> => {
     if (!pair || !pair.pub || !pair.priv) {
       if (cb) cb(null)
@@ -199,21 +195,21 @@ const SEA = {
       const check = utils.parse(data as never) as Record<string, unknown>
       for (const k of Object.keys(check).sort()) {
         if (k !== "_" && k !== userPublicKey && k !== userSignature) {
-          (msg as Record<string, unknown>)[k] = check[k]
+          ;(msg as Record<string, unknown>)[k] = check[k]
         }
       }
     }
     const hash = await utils.sha256(msg)
     const jwk = utils.jwk(pair.pub, pair.priv)
-    const alg = { name: "ECDSA", namedCurve: "P-256" }
+    const alg = {name: "ECDSA", namedCurve: "P-256"}
     const sig = await utils.subtle
       .importKey("jwk", jwk, alg, false, ["sign"])
       .then(key =>
         utils.subtle.sign(
-          { name: "ECDSA", hash: { name: "SHA-256" } },
+          {name: "ECDSA", hash: {name: "SHA-256"}},
           key,
-          new Uint8Array(hash)
-        )
+          new Uint8Array(hash),
+        ),
       )
     const signed: SignedData = {
       m: msg,
@@ -230,7 +226,7 @@ const SEA = {
   signTimestamp: async (
     timestamp: number,
     pair: Partial<UserPair> | null,
-    cb?: Callback<string | null>
+    cb?: Callback<string | null>,
   ): Promise<string | null> => {
     if (!pair || !pair.pub || !pair.priv) {
       if (cb) cb(null)
@@ -241,16 +237,16 @@ const SEA = {
     const timestampStr = timestamp.toString()
     const hash = await utils.sha256(timestampStr)
     const jwk = utils.jwk(pair.pub, pair.priv)
-    const alg = { name: "ECDSA", namedCurve: "P-256" }
+    const alg = {name: "ECDSA", namedCurve: "P-256"}
 
     const sig = await utils.subtle
       .importKey("jwk", jwk, alg, false, ["sign"])
       .then(key =>
         utils.subtle.sign(
-          { name: "ECDSA", hash: { name: "SHA-256" } },
+          {name: "ECDSA", hash: {name: "SHA-256"}},
           key,
-          new Uint8Array(hash)
-        )
+          new Uint8Array(hash),
+        ),
       )
 
     const signature = SafeBuffer.from(sig, "binary").toString("base64")
@@ -266,7 +262,7 @@ const SEA = {
     timestamp: number,
     signature: string,
     publicKey: string,
-    cb?: Callback<boolean>
+    cb?: Callback<boolean>,
   ): Promise<boolean> => {
     if (!publicKey || !timestamp || !signature) {
       if (cb) cb(false)
@@ -281,25 +277,27 @@ const SEA = {
       const key = await utils.subtle.importKey(
         "jwk",
         utils.jwk(publicKey),
-        { name: "ECDSA", namedCurve: "P-256" },
+        {name: "ECDSA", namedCurve: "P-256"},
         false,
-        ["verify"]
+        ["verify"],
       )
 
       const sig = new Uint8Array(SafeBuffer.from(signature, "base64"))
-      const alg = { name: "ECDSA", hash: { name: "SHA-256" } }
+      const alg = {name: "ECDSA", hash: {name: "SHA-256"}}
 
       const isValid = await utils.subtle.verify(
         alg,
         key,
         sig,
-        new Uint8Array(hash)
+        new Uint8Array(hash),
       )
 
       if (cb) cb(isValid)
       return isValid
     } catch (err) {
-      console.log(`error verifying timestamp signature: ${(err as Error).message}`)
+      console.log(
+        `error verifying timestamp signature: ${(err as Error).message}`,
+      )
       if (cb) cb(false)
       return false
     }
@@ -311,13 +309,13 @@ const SEA = {
   work: async (
     data: unknown,
     salt?: unknown,
-    cb?: Callback<{ epriv: string }>
-  ): Promise<{ epriv: string }> => {
+    cb?: Callback<{epriv: string}>,
+  ): Promise<{epriv: string}> => {
     let _cb = cb
     let _salt = salt
 
     if (typeof salt === "function") {
-      _cb = salt as Callback<{ epriv: string }>
+      _cb = salt as Callback<{epriv: string}>
       _salt = undefined
     }
     if (typeof _salt === "undefined") _salt = utils.random(9)
@@ -325,19 +323,19 @@ const SEA = {
     const key = await utils.subtle.importKey(
       "raw",
       new TextEncoder().encode(utils.stringify(data)),
-      { name: "PBKDF2" },
+      {name: "PBKDF2"},
       false,
-      ["deriveBits"]
+      ["deriveBits"],
     )
     const alg = {
       name: "PBKDF2",
       iterations: 100000,
       salt: new TextEncoder().encode(_salt as string),
-      hash: { name: "SHA-256" },
+      hash: {name: "SHA-256"},
     }
     const work = await utils.subtle.deriveBits(alg, key, 512)
     // Use "pair" format so that work can be used as epriv by decrypt
-    const pair = { epriv: SafeBuffer.from(work, "binary").toString("base64") }
+    const pair = {epriv: SafeBuffer.from(work, "binary").toString("base64")}
     if (_cb) _cb(pair)
     return pair
   },
@@ -348,41 +346,40 @@ const SEA = {
   secret: async (
     to: Partial<UserPair> | null,
     from: Partial<UserPair> | null,
-    cb?: Callback<{ epriv: string } | null>
-  ): Promise<{ epriv: string } | null> => {
+    cb?: Callback<{epriv: string} | null>,
+  ): Promise<{epriv: string} | null> => {
     if (!to || !to.epub || !from || !from.epub || !from.epriv) {
       if (cb) cb(null)
       return null
     }
 
-    const alg = { name: "ECDH", namedCurve: "P-256" }
+    const alg = {name: "ECDH", namedCurve: "P-256"}
     const pub = utils.jwk(to.epub)
     const pubKey = await utils.subtle.importKey("jwk", pub, alg, true, [])
     const priv = utils.jwk(from.epub, from.epriv)
     // utils.jwk provides default key_ops but it shouldn't be used here
-    delete (priv as { key_ops?: unknown }).key_ops
+    delete (priv as {key_ops?: unknown}).key_ops
     const derived = await utils.subtle
       .importKey("jwk", priv, alg, false, ["deriveBits"])
       .then(async key => {
         const derivedBits = await utils.subtle.deriveBits(
-          { public: pubKey, name: "ECDH", namedCurve: "P-256" } as never,
+          {public: pubKey, name: "ECDH", namedCurve: "P-256"} as never,
           key,
-          256
+          256,
         )
         const derivedKey = await utils.subtle.importKey(
           "raw",
           new Uint8Array(derivedBits),
-          { name: "AES-GCM", length: 256 },
+          {name: "AES-GCM", length: 256},
           true,
-          ["encrypt", "decrypt"]
+          ["encrypt", "decrypt"],
         )
-        return utils.subtle.exportKey("jwk", derivedKey).then(({ k }) => k!)
+        return utils.subtle.exportKey("jwk", derivedKey).then(({k}) => k!)
       })
     // Use "pair" format so that secret can be used as epriv by encrypt
-    if (cb) cb({ epriv: derived })
-    return { epriv: derived }
+    if (cb) cb({epriv: derived})
+    return {epriv: derived}
   },
 }
 
 export default SEA
-

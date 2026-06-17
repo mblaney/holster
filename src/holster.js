@@ -64,28 +64,30 @@ const Holster = opt => {
             delete msg.put[soul][utils.userPublicKey]
             delete msg.put[soul][utils.userSignature]
             // Resolve any rels on the node before returning to the user.
-            await Promise.all(Object.keys(msg.put[soul]).map(async key => {
-              const id = utils.rel.is(msg.put[soul][key])
-              if (!id) return
-              const attemptRead = async (retries = 0) => {
-                const data = await new Promise(res => {
-                  const _ctxid = utils.text.random()
-                  const ctx = allctx.get(ctxid)
-                  allctx.set(_ctxid, {
-                    chain: [{item: null, soul: id}],
-                    user: ctx ? ctx.user : null,
+            await Promise.all(
+              Object.keys(msg.put[soul]).map(async key => {
+                const id = utils.rel.is(msg.put[soul][key])
+                if (!id) return
+                const attemptRead = async (retries = 0) => {
+                  const data = await new Promise(res => {
+                    const _ctxid = utils.text.random()
+                    const ctx = allctx.get(ctxid)
+                    allctx.set(_ctxid, {
+                      chain: [{item: null, soul: id}],
+                      user: ctx ? ctx.user : null,
+                    })
+                    api(_ctxid).next(null, res, _opt)
                   })
-                  api(_ctxid).next(null, res, _opt)
-                })
-                if (data !== null || retries >= 5) {
-                  return data
+                  if (data !== null || retries >= 5) {
+                    return data
+                  }
+                  // Data not ready, retry after delay
+                  await new Promise(resolve => setTimeout(resolve, 50))
+                  return attemptRead(retries + 1)
                 }
-                // Data not ready, retry after delay
-                await new Promise(resolve => setTimeout(resolve, 50))
-                return attemptRead(retries + 1)
-              }
-              msg.put[soul][key] = await attemptRead()
-            }))
+                msg.put[soul][key] = await attemptRead()
+              }),
+            )
             ack(msg.put[soul])
           } else {
             // No data callback.
@@ -281,7 +283,11 @@ const Holster = opt => {
                 if (request._get) cb(null)
               } else if (get && node) {
                 const sv = node._ && node._[">"]
-                if (sv && Object.keys(sv).length > 0 && typeof sv[item] === "undefined") {
+                if (
+                  sv &&
+                  Object.keys(sv).length > 0 &&
+                  typeof sv[item] === "undefined"
+                ) {
                   // State vector has other properties but not this one — never written.
                   if (cb) cb(null)
                 } else {
@@ -666,8 +672,11 @@ const Holster = opt => {
                       chain: [{item: null, soul: id}],
                       user: ctx ? ctx.user : null,
                     })
-                    api(_ctxid).next(null, res, retries === 0 ?
-                                     utils.obj.put(_opt, "fast", true) : _opt)
+                    api(_ctxid).next(
+                      null,
+                      res,
+                      retries === 0 ? utils.obj.put(_opt, "fast", true) : _opt,
+                    )
                   })
                   if (data !== null || retries >= 5) {
                     retryCount = 0 // Reset retry counter on success
@@ -693,8 +702,10 @@ const Holster = opt => {
                   // miss and never fire again if the data doesn't change while
                   // the listener is attached, so we must poll for initial load.
                   const retry = () => {
-                    const delay =
-                          Math.min(retryDelay * Math.pow(2, retryCount), 30000)
+                    const delay = Math.min(
+                      retryDelay * Math.pow(2, retryCount),
+                      30000,
+                    )
                     retryCount++
                     retryTimer = setTimeout(() => {
                       wire.get(
