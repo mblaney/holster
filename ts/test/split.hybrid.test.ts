@@ -1,7 +1,11 @@
-import { describe, test } from "node:test"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Radisk from "../src/radisk.ts"
-import type { RadiskInterface, RadiskOptions, EncodedValue } from "../src/schemas.ts"
+import type {
+  RadiskInterface,
+  RadiskOptions,
+  EncodedValue,
+} from "../src/schemas.ts"
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)
@@ -20,7 +24,11 @@ describe("hybrid split depth cap", () => {
       get: (file: string, cb: (err?: string, data?: EncodedValue) => void) => {
         cb(undefined, puts[file] as unknown as EncodedValue | undefined)
       },
-      put: (file: string, data: string | EncodedValue | Record<string, unknown>, cb: (err?: string) => void) => {
+      put: (
+        file: string,
+        data: string | EncodedValue | Record<string, unknown>,
+        cb: (err?: string) => void,
+      ) => {
         puts[file] = data as unknown as string
         cb(undefined)
       },
@@ -45,8 +53,14 @@ describe("hybrid split depth cap", () => {
 
     setTimeout(() => {
       assert.deepEqual(Object.keys(puts).sort(), ["!", "Fb"])
-      assert.ok(!puts["!"]!.includes("b" + enq), "root file must not contain Fb entries")
-      assert.ok(puts["Fb"]!.includes("b" + enq), "Fb file must contain Fb entries")
+      assert.ok(
+        !puts["!"]!.includes("b" + enq),
+        "root file must not contain Fb entries",
+      )
+      assert.ok(
+        puts["Fb"]!.includes("b" + enq),
+        "Fb file must contain Fb entries",
+      )
       done()
     }, 10)
   })
@@ -76,7 +90,11 @@ describe("hybrid split depth cap", () => {
 
     setTimeout(() => {
       const extra = Object.keys(puts).filter(f => f !== "!" && f !== "Fb")
-      assert.deepEqual(extra, [], "no files deeper than the per-soul file must be created")
+      assert.deepEqual(
+        extra,
+        [],
+        "no files deeper than the per-soul file must be created",
+      )
       done()
     }, 10)
   })

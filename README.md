@@ -1,7 +1,7 @@
 Holster is a real-time data synchronisation service that seamlessly connects
-devices using Node.js, Deno, Bun or the browser. Built with modern ES modules,
-it features end-to-end encryption, intelligent conflict resolution, and
-cross-platform compatibility.
+devices using Node.js, Deno, Bun or the browser. Built with ES modules, it
+features end-to-end encryption, conflict resolution and cross-platform
+compatibility.
 
 ✨ Real-time sync across all connected devices\
 🔐 Built-in encryption with user authentication\
@@ -36,8 +36,40 @@ to get started using the API, and for more information.
 - You will then also have access to the Holster API via the `holster` object in
 the console
 
+### How to run a Holster relay
+
+To run a Holster relay, create a `relay.js` file with:
+
+```
+import Holster from "@mblaney/holster/src/holster.js"
+Holster({port: 8765})
+```
+
+That's all you need to run a server on port `8765`. You may also want to pass in
+memory and storage options with larger values than the defaults, which are
+conservative to support browser use. See [Holster options](https://github.com/mblaney/holster/wiki/Holster-API#holster-options) for more details. To run this
+with node:
+
+ - `npm install`
+ - `node relay.js`
+
+For production you can start with pm2:
+
+ - `npm install pm2 -g`
+ - `export NODE_ENV=production`
+ - `pm2 startup` (And follow startup instructions.)
+ - `pm2 start relay.js`
+ - `pm2 save`
+
+To allow connections via a web server see [examples/apache.md](examples/apache.md).
+
 ### Development
 
-- When modifying src files run: `npx prettier src --write && npm run build`
+#### JavaScript
+- When modifying src files run: `npx prettier src --write`
 - When modifying tests run: `npx prettier test --write`
-- To run the tests use: `npm run test`
+- To run the JavaScript tests use: `npm run test`
+
+#### TypeScript
+- When modifying TypeScript files run: `npx prettier ts --write`
+- To run the TypeScript tests use: `npm run test:ts`

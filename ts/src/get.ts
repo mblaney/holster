@@ -3,9 +3,9 @@
  * Extracts nodes and properties based on lex queries
  */
 
-import { match, userPublicKey } from "./utils.ts"
-import type { Lex, Graph } from "./schemas.ts"
-import type { GraphNode } from "./schemas.ts"
+import {match, userPublicKey} from "./utils.ts"
+import type {Lex, Graph} from "./schemas.ts"
+import type {GraphNode} from "./schemas.ts"
 
 /**
  * Get data from graph based on lex query
@@ -29,7 +29,7 @@ const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
   if (!graph[soul]) return undefined
 
   const stateVector: Record<string, number> = {}
-  const node: GraphNode = { _: { "#": soul, ">": stateVector } }
+  const node: GraphNode = {_: {"#": soul, ">": stateVector}}
   const signatures: Record<string, string> = {}
 
   if (typeof lex["."] === "string") {
@@ -76,8 +76,7 @@ const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
   if (Object.keys(signatures).length > 0) {
     node._["s"] = signatures
   }
-  return { [soul]: node }
+  return {[soul]: node}
 }
 
 export default Get
-

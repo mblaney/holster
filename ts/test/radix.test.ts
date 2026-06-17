@@ -1,7 +1,7 @@
-import { describe, test } from "node:test"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Radix from "../src/radix.ts"
-import type { RadixFunction, EncodedValue } from "../src/schemas.ts"
+import type {RadixFunction, EncodedValue} from "../src/schemas.ts"
 import Names from "./names.ts"
 
 const names: string[] = Names()
@@ -17,18 +17,18 @@ describe("radix", () => {
   test("unit", () => {
     radix("asdf.pub", "yum")
     radix("ablah", "cool")
-    radix("abc", { yes: 1 })
+    radix("abc", {yes: 1})
     radix("node/circle.bob", "awesome")
 
-    assert.deepEqual(radix("asdf."), { pub: { [record]: "yum" } })
+    assert.deepEqual(radix("asdf."), {pub: {[record]: "yum"}})
     assert.equal(radix("nv/foo.bar"), undefined)
     assert.equal(radix("ablah"), "cool")
-    assert.deepEqual(radix("abc"), { yes: 1 })
+    assert.deepEqual(radix("abc"), {yes: 1})
     assert.equal(radix("abcd"), undefined)
     assert.deepEqual(radix(), {
       a: {
         [group]: {
-          "sdf.pub": { [record]: "yum" },
+          "sdf.pub": {[record]: "yum"},
           b: {
             [group]: {
               c: {
@@ -43,26 +43,26 @@ describe("radix", () => {
           },
         },
       },
-      "node/circle.bob": { [record]: "awesome" },
+      "node/circle.bob": {[record]: "awesome"},
     })
   })
 
   test("replace", () => {
     radix("asdf.pub", "yuck")
     radix("ablah", "cool!")
-    radix("abc", { yes: 2 })
+    radix("abc", {yes: 2})
     radix("node/circle.bob", "awe")
     radix("abcd", true)
 
-    assert.deepEqual(radix("asdf."), { pub: { [record]: "yuck" } })
+    assert.deepEqual(radix("asdf."), {pub: {[record]: "yuck"}})
     assert.equal(radix("ablah"), "cool!")
     assert.equal(radix("nv/foo.bar"), undefined)
-    assert.deepEqual(radix("abc"), { yes: 2 })
+    assert.deepEqual(radix("abc"), {yes: 2})
     assert.equal(radix("abcd"), true)
     assert.deepEqual(radix(), {
       a: {
         [group]: {
-          "sdf.pub": { [record]: "yuck" },
+          "sdf.pub": {[record]: "yuck"},
           b: {
             [group]: {
               c: {
@@ -82,7 +82,7 @@ describe("radix", () => {
           },
         },
       },
-      "node/circle.bob": { [record]: "awe" },
+      "node/circle.bob": {[record]: "awe"},
     })
   })
 
@@ -117,4 +117,3 @@ describe("radix", () => {
     assert.equal(Object.keys(all).length, 0)
   })
 })
-

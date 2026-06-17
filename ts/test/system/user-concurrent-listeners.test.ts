@@ -1,9 +1,9 @@
 import fs from "fs"
-import { Server} from "mock-socket"
-import { describe, test} from "node:test"
+import {Server} from "mock-socket"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Holster from "../../src/holster.ts"
-import type { HolsterAPI } from "../../src/holster.ts"
+import type {HolsterAPI} from "../../src/holster.ts"
 
 describe("system - user concurrent listeners", () => {
   const wss: Server = new Server("ws://localhost:9015")
@@ -70,9 +70,9 @@ describe("system - user concurrent listeners", () => {
           user.get("parent").on(data => {
             parentCalled = true
             assert.notEqual(data, null)
-            assert.equal((data as { value: string }).value, "parent-value")
+            assert.equal((data as {value: string}).value, "parent-value")
             // Parent includes child as a rel
-            assert.notEqual((data as { child?: unknown }).child, undefined)
+            assert.notEqual((data as {child?: unknown}).child, undefined)
             checkComplete()
           }, true)
 
@@ -106,7 +106,7 @@ describe("system - user concurrent listeners", () => {
       // Set up listener with _get=true to read existing data
       // The listener will be called with the existing data via the get request
       user.get("race").on(data => {
-        results.push((data as { value?: string } | null)?.value)
+        results.push((data as {value?: string} | null)?.value)
       }, true)
 
       // Immediately put new data - listener will fire for this put as well

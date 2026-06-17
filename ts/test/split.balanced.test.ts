@@ -1,7 +1,11 @@
 import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Radisk from "../src/radisk.ts"
-import type {RadiskInterface, RadiskOptions, EncodedValue} from "../src/schemas.ts"
+import type {
+  RadiskInterface,
+  RadiskOptions,
+  EncodedValue,
+} from "../src/schemas.ts"
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)

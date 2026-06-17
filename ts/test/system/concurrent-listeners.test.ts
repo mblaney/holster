@@ -1,13 +1,16 @@
 import fs from "fs"
-import { Server} from "mock-socket"
-import { describe, test} from "node:test"
+import {Server} from "mock-socket"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Holster from "../../src/holster.ts"
-import type { HolsterAPI } from "../../src/holster.ts"
+import type {HolsterAPI} from "../../src/holster.ts"
 
 describe("system - concurrent listeners", () => {
   const wss: Server = new Server("ws://localhost:9005")
-  const holster: HolsterAPI = Holster({file: "test/system/concurrent-listeners", wss: wss})
+  const holster: HolsterAPI = Holster({
+    file: "test/system/concurrent-listeners",
+    wss: wss,
+  })
 
   test("multiple listeners on same path receive data", (t, done) => {
     let listener1Called = false
@@ -20,14 +23,14 @@ describe("system - concurrent listeners", () => {
       holster.get("key").on(data => {
         listener1Called = true
         assert.notEqual(data, null)
-        assert.equal((data as { value: string }).value, "test")
+        assert.equal((data as {value: string}).value, "test")
         checkComplete()
       }, true)
 
       holster.get("key").on(data => {
         listener2Called = true
         assert.notEqual(data, null)
-        assert.equal((data as { value: string }).value, "test")
+        assert.equal((data as {value: string}).value, "test")
         checkComplete()
       }, true)
 
@@ -56,7 +59,7 @@ describe("system - concurrent listeners", () => {
           holster.get("parent").on(data => {
             parentCalled = true
             assert.notEqual(data, null)
-            assert.equal((data as { value: string }).value, "parent-value")
+            assert.equal((data as {value: string}).value, "parent-value")
             checkComplete()
           }, true)
 
@@ -67,7 +70,7 @@ describe("system - concurrent listeners", () => {
             .on(data => {
               childCalled = true
               assert.notEqual(data, null)
-              assert.equal((data as { value: string }).value, "child-value")
+              assert.equal((data as {value: string}).value, "child-value")
               checkComplete()
             }, true)
 
@@ -90,7 +93,7 @@ describe("system - concurrent listeners", () => {
       // Set up listener with _get=true to read existing data
       // The listener will be called with the existing data via the get request
       holster.get("race").on(data => {
-        results.push((data as { value?: string } | null)?.value)
+        results.push((data as {value?: string} | null)?.value)
       }, true)
 
       // Immediately put new data - listener will fire for this put as well

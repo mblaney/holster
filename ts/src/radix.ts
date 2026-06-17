@@ -4,7 +4,7 @@
  */
 
 import * as utils from "./utils.ts"
-import type { EncodedValue, RadixFunction } from "./schemas.ts"
+import type {EncodedValue, RadixFunction} from "./schemas.ts"
 
 // ASCII character for group separator
 const group = String.fromCharCode(29)
@@ -34,10 +34,11 @@ const Radix = (): RadixFunction => {
   const radix = ((
     keys?: string,
     value?: EncodedValue,
-    tree?: RadixTree
+    tree?: RadixTree,
   ): RadixNode | EncodedValue | undefined | Record<string, EncodedValue> => {
     if (!tree) {
-      if (!(radix as Record<string, unknown>)[group]) (radix as Record<string, unknown>)[group] = {}
+      if (!(radix as Record<string, unknown>)[group])
+        (radix as Record<string, unknown>)[group] = {}
       tree = (radix as Record<string, RadixTree>)[group]!
     }
     if (!keys) return tree
@@ -57,32 +58,35 @@ const Radix = (): RadixFunction => {
 
     if (!found) {
       // If not found from the provided keys try matching with an existing key
-      const result = utils.obj.map(tree!, (hasValue: RadixValue, hasKey: string) => {
-        let j = 0
-        let matchingKey = ""
-        while (hasKey[j] === keys[j]) {
-          matchingKey += hasKey[j]
-          j++
-        }
-        if (matchingKey) {
-          if (noValue) {
-            // matchingKey has to be as long as the original keys when reading
-            if (j <= max) return undefined
-
-            tmp[hasKey.slice(j)] = hasValue
-            return hasValue
+      const result = utils.obj.map(
+        tree!,
+        (hasValue: RadixValue, hasKey: string) => {
+          let j = 0
+          let matchingKey = ""
+          while (hasKey[j] === keys[j]) {
+            matchingKey += hasKey[j]
+            j++
           }
+          if (matchingKey) {
+            if (noValue) {
+              // matchingKey has to be as long as the original keys when reading
+              if (j <= max) return undefined
 
-          const replace: RadixTree = {
-            [hasKey.slice(j)]: hasValue,
-            [keys.slice(j)]: { [record]: value! },
+              tmp[hasKey.slice(j)] = hasValue
+              return hasValue
+            }
+
+            const replace: RadixTree = {
+              [hasKey.slice(j)]: hasValue,
+              [keys.slice(j)]: {[record]: value!},
+            }
+            tree![matchingKey] = {[group]: replace}
+            delete tree![hasKey]
+            return true
           }
-          tree![matchingKey] = { [group]: replace }
-          delete tree![hasKey]
-          return true
-        }
-        return undefined
-      })
+          return undefined
+        },
+      )
 
       if (!result) {
         if (noValue) return undefined
@@ -96,7 +100,9 @@ const Radix = (): RadixFunction => {
       // If no value use the key provided to return a whole group or record
       if (noValue) {
         // If an individual record isn't found then return the whole group
-        return typeof found[record] === "undefined" ? found[group] : found[record]
+        return typeof found[record] === "undefined"
+          ? found[group]
+          : found[record]
       }
       // Otherwise create a new record at the provided key for value
       found[record] = value!
@@ -120,22 +126,33 @@ const Radix = (): RadixFunction => {
  */
 Radix.map = function map(
   radix: RadixFunction | RadixNode,
-  cb: (value: EncodedValue, fullKey: string, key: string, pre: string[]) => unknown,
+  cb: (
+    value: EncodedValue,
+    fullKey: string,
+    key: string,
+    pre: string[],
+  ) => unknown,
   opt?: boolean,
-  pre: string[] = []
+  pre: string[] = [],
 ): unknown {
-  const tree = ((radix as Record<string, RadixTree>)[group] || radix) as RadixTree
+  const tree = ((radix as Record<string, RadixTree>)[group] ||
+    radix) as RadixTree
   const keys = Object.keys(tree).sort()
 
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i]!
     const found = tree[key]
     if (!found) continue
-    
+
     const recordValue = found[record]
 
     if (typeof recordValue !== "undefined") {
-      const result = cb(recordValue as EncodedValue, pre.join("") + key, key, pre)
+      const result = cb(
+        recordValue as EncodedValue,
+        pre.join("") + key,
+        key,
+        pre,
+      )
       if (typeof result !== "undefined") return result
     } else if (opt) {
       cb(undefined as never, pre.join(""), key, pre)
@@ -154,4 +171,3 @@ Radix.map = function map(
 }
 
 export default Radix
-

@@ -1,4 +1,4 @@
-import { z } from "zod"
+import {z} from "zod"
 
 // ============================================================================
 // Core Primitive Types
@@ -48,7 +48,7 @@ export const GraphValueSchema: z.ZodType<GraphValue> = z.lazy(() =>
     z.null(),
     RelationSchema,
     z.record(z.string(), GraphValueSchema),
-  ])
+  ]),
 )
 
 export type GraphValue =
@@ -57,7 +57,7 @@ export type GraphValue =
   | boolean
   | null
   | Relation
-  | { [key: string]: GraphValue }
+  | {[key: string]: GraphValue}
 
 /**
  * State vector - tracks timestamps for each property
@@ -91,9 +91,11 @@ export const USER_SIGNATURE = "_holster_user_signature"
  * Graph node - contains metadata and properties
  * Note: Using manual type to properly handle the index signature with special _ key
  */
-export const GraphNodeSchema = z.object({
-  _: GraphMetadataSchema,
-}).and(z.record(z.string(), GraphValueSchema))
+export const GraphNodeSchema = z
+  .object({
+    _: GraphMetadataSchema,
+  })
+  .and(z.record(z.string(), GraphValueSchema))
 
 export type GraphNode = {
   _: GraphMetadata
@@ -141,9 +143,7 @@ export const LexFilterSchema = z.union([
 export type LexFilter = z.infer<typeof LexFilterSchema>
 
 // LexFilter with optional "." property for nested queries
-export type LexWithDot =
-  | LexFilter
-  | { ".": LexFilter }
+export type LexWithDot = LexFilter | {".": LexFilter}
 
 /**
  * Lex query object
@@ -294,8 +294,18 @@ export const FileSystemInterfaceSchema = z.object({
 // FileSystemInterface: Flexible to support both string-based and EncodedValue storage
 // In-memory stores use strings, disk stores use EncodedValue/RadixNode
 export interface FileSystemInterface {
-  get: (file: string, cb: (err?: string | null, data?: string | EncodedValue | Record<string, unknown>) => void) => void
-  put: (file: string, data: string | EncodedValue | Record<string, unknown>, cb: (err?: string | null) => void) => void
+  get: (
+    file: string,
+    cb: (
+      err?: string | null,
+      data?: string | EncodedValue | Record<string, unknown>,
+    ) => void,
+  ) => void
+  put: (
+    file: string,
+    data: string | EncodedValue | Record<string, unknown>,
+    cb: (err?: string | null) => void,
+  ) => void
   list: (cb: (file?: string) => void) => void
 }
 
@@ -405,6 +415,9 @@ export const HolsterOptionsSchema = z
     maxConnections: z.number().optional(),
     maxMessageSize: z.number().optional(),
     maxQueueLength: z.number().optional(),
+    userLimit: z.boolean().optional(),
+    defaultLimit: z.number().optional(),
+    maxGraphSize: z.number().optional(),
   })
   .passthrough()
 export type HolsterOptions = z.infer<typeof HolsterOptionsSchema>
@@ -462,20 +475,28 @@ export type RadixValue = GraphValue | EncodedValue | RadixNode
  */
 export type RadixFunction = {
   // Main call signature: synchronous get/put operations
-  (keys?: string, value?: GraphValue | EncodedValue, tree?: RadixNode): 
-    RadixNode | EncodedValue | undefined | Record<string, EncodedValue>
-  
+  (
+    keys?: string,
+    value?: GraphValue | EncodedValue,
+    tree?: RadixNode,
+  ): RadixNode | EncodedValue | undefined | Record<string, EncodedValue>
+
   // Callback form: async operations
   (key?: string, value?: RadixValue, cb?: (err?: string) => void): void
-  
+
   // Static map method for iterating over radix tree values
   map: (
-    radix: RadixFunction | RadixNode, 
-    cb: (value: EncodedValue, fullKey: string, key: string, pre: string[]) => unknown,
+    radix: RadixFunction | RadixNode,
+    cb: (
+      value: EncodedValue,
+      fullKey: string,
+      key: string,
+      pre: string[],
+    ) => unknown,
     opt?: boolean,
-    pre?: string[]
+    pre?: string[],
   ) => unknown
-  
+
   // Dynamic properties for internal state (e.g., group separator key)
   [key: string]: unknown
 }
@@ -506,10 +527,9 @@ export type Dup = z.infer<typeof DupSchema> & {
 // ============================================================================
 
 // Export RadiskInterface from radisk module for test usage
-export type { RadiskInterface } from "./radisk.ts"
+export type {RadiskInterface} from "./radisk.ts"
 
 // Export other interfaces for test usage
-export type { WireAPI as WireInterface } from "./wire.ts"
-export type { UserInterface } from "./user.ts"
-export type { StoreInterface } from "./store.ts"
-
+export type {WireAPI as WireInterface} from "./wire.ts"
+export type {UserInterface} from "./user.ts"
+export type {StoreInterface} from "./store.ts"

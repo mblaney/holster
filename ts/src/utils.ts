@@ -3,7 +3,14 @@
  * Provides helpers for type checking, graph manipulation, and pattern matching
  */
 
-import type { Soul, Relation, Graph, GraphNode, LexFilter, GraphValue } from "./schemas.ts"
+import type {
+  Soul,
+  Relation,
+  Graph,
+  GraphNode,
+  LexFilter,
+  GraphValue,
+} from "./schemas.ts"
 
 // ============================================================================
 // Number Utilities
@@ -50,7 +57,7 @@ export const obj = {
   map: <T, R>(
     list: Record<string, T>,
     cb: (value: T, key: string, o?: Record<string, unknown>) => R | undefined,
-    o?: Record<string, unknown>
+    o?: Record<string, unknown>,
   ): R | undefined => {
     const keys = Object.keys(list)
     for (let i = 0; i < keys.length; i++) {
@@ -64,7 +71,11 @@ export const obj = {
   /**
    * Set a property on an object
    */
-  put: (o: Record<string, unknown> | undefined, key: string, value: unknown): Record<string, unknown> => {
+  put: (
+    o: Record<string, unknown> | undefined,
+    key: string,
+    value: unknown,
+  ): Record<string, unknown> => {
     const target = o || {}
     target[key] = value
     return target
@@ -73,7 +84,10 @@ export const obj = {
   /**
    * Delete a property from an object
    */
-  del: <T>(o: Record<string, T> | undefined, key: string): Record<string, T> | undefined => {
+  del: <T>(
+    o: Record<string, T> | undefined,
+    key: string,
+  ): Record<string, T> | undefined => {
     if (!o) return undefined
     o[key] = null as T
     delete o[key]
@@ -85,7 +99,11 @@ export const obj = {
 // Relation Utilities
 // ============================================================================
 
-const map_soul = (soul: unknown, key: string, o: { id: string | false }): void => {
+const map_soul = (
+  soul: unknown,
+  key: string,
+  o: {id: string | false},
+): void => {
   // If id is already defined AND we're still looping through the object,
   // then it is considered invalid
   if (o.id) {
@@ -115,8 +133,16 @@ export const rel = {
       !("_" in value) &&
       obj.is(value)
     ) {
-      const o: { id: string | false } = { id: "" }
-      obj.map(value as Record<string, unknown>, map_soul as (value: unknown, key: string, o?: Record<string, unknown>) => void, o)
+      const o: {id: string | false} = {id: ""}
+      obj.map(
+        value as Record<string, unknown>,
+        map_soul as (
+          value: unknown,
+          key: string,
+          o?: Record<string, unknown>,
+        ) => void,
+        o,
+      )
       if (o.id) return o.id
     }
     return false
@@ -147,12 +173,12 @@ export const graph = (
   data: Record<string, GraphValue>,
   sig?: string,
   pub?: string,
-  timestamp?: number
+  timestamp?: number,
 ): Graph => {
   const ts = timestamp || Date.now()
   const stateVector: Record<string, number> = {}
   const node: GraphNode = {
-    _: { "#": soul, ">": stateVector },
+    _: {"#": soul, ">": stateVector},
   }
 
   for (const [key, value] of Object.entries(data)) {
@@ -171,7 +197,7 @@ export const graph = (
     stateVector[userPublicKey] = timestamp
   }
 
-  return { [soul]: node }
+  return {[soul]: node}
 }
 
 // ============================================================================
@@ -229,4 +255,3 @@ export const text = {
     return s
   },
 }
-

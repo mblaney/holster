@@ -34,7 +34,7 @@ const Radisk = opt => {
   if (!opt.write) opt.write = 1 // Wait time before write in milliseconds
   if (!opt.size) opt.size = 1024 * 1024 // File size on disk, default 1MB
   if (!opt.memoryLimit) opt.memoryLimit = 500 // Memory limit in MB
-  if (typeof opt.cache === "undefined") opt.cache = true
+  if (typeof opt.cache === "undefined") opt.cache = true // Used in tests
 
   if (!opt.store) {
     opt.log(
@@ -265,7 +265,7 @@ const Radisk = opt => {
       limit: "",
       done: false,
       count: 0,
-      halfKey: "",   // soul ID at the ~opt.size/2 mark for a balanced split
+      halfKey: "", // soul ID at the ~opt.size/2 mark for a balanced split
       halfOffset: 0, // write.text.length before that entry
       each: (value, key, k, pre) => {
         // each is called for all keys, but stop adding to write.text when
@@ -295,8 +295,7 @@ const Radisk = opt => {
         ) {
           const fullKey = pre.join("") + k
           const end = fullKey.indexOf(enq)
-          write.halfKey =
-            end === -1 ? fullKey : fullKey.substring(0, end)
+          write.halfKey = end === -1 ? fullKey : fullKey.substring(0, end)
           write.halfOffset = write.text.length
         }
 
@@ -308,8 +307,7 @@ const Radisk = opt => {
           const fullKey = pre.join("") + k
           const end = fullKey.indexOf(enq)
           write.limit =
-            write.halfKey ||
-            (end === -1 ? fullKey : fullKey.substring(0, end))
+            write.halfKey || (end === -1 ? fullKey : fullKey.substring(0, end))
           // Cannot split if the key is the same as the current file name.
           if (write.limit !== file) {
             // Truncate to the balanced split point — text after halfOffset is
@@ -355,17 +353,26 @@ const Radisk = opt => {
 
     // Binary search for largest filename <= soul in a sorted array.
     const findFile = files => {
-      let lo = 0, hi = files.length - 1, result = null
+      let lo = 0,
+        hi = files.length - 1,
+        result = null
       while (lo <= hi) {
         const mid = (lo + hi) >> 1
-        if (files[mid] <= soul) { result = files[mid]; lo = mid + 1 }
-        else { hi = mid - 1 }
+        if (files[mid] <= soul) {
+          result = files[mid]
+          lo = mid + 1
+        } else {
+          hi = mid - 1
+        }
       }
       return result
     }
 
     const read = file => {
-      if (!file) { cb("no file found", u); return }
+      if (!file) {
+        cb("no file found", u)
+        return
+      }
       if (opt.cache && cache.has(file)) {
         return cb(u, cache.get(file)(key))
       }
@@ -380,12 +387,19 @@ const Radisk = opt => {
     }
 
     const now = Date.now()
-    if (opt.cache && fileListCache && now - fileListCacheTime < FILE_LIST_CACHE_TTL) {
+    if (
+      opt.cache &&
+      fileListCache &&
+      now - fileListCacheTime < FILE_LIST_CACHE_TTL
+    ) {
       read(findFile(fileListCache, soul))
     } else {
       const files = []
       opt.store.list(file => {
-        if (file) { files.push(file); return }
+        if (file) {
+          files.push(file)
+          return
+        }
         files.sort()
         if (opt.cache) {
           fileListCache = files

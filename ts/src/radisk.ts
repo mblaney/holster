@@ -4,9 +4,14 @@
  */
 
 import Radix from "./radix.ts"
-import type { RadixFunction } from "./schemas.ts"
+import type {RadixFunction} from "./schemas.ts"
 import * as utils from "./utils.ts"
-import type { EncodedValue, RadiskOptions, GraphValue, Relation } from "./schemas.ts"
+import type {
+  EncodedValue,
+  RadiskOptions,
+  GraphValue,
+  Relation,
+} from "./schemas.ts"
 
 // ASCII character for end of text
 const etx = String.fromCharCode(3)
@@ -18,8 +23,18 @@ const unit = String.fromCharCode(31)
 export interface RadiskInterface extends RadixFunction {
   // Override call signature to support both get (with callback) and put (with value and optional callback)
   // Accepts GraphValue (raw values) OR EncodedValue (tuples) - see src/radisk.js and tests
-  (key?: string, value?: GraphValue | EncodedValue | ((err?: string | null, value?: EncodedValue | Record<string, EncodedValue>) => void), cb?: (err?: string | null) => void): void
-  
+  (
+    key?: string,
+    value?:
+      | GraphValue
+      | EncodedValue
+      | ((
+          err?: string | null,
+          value?: EncodedValue | Record<string, EncodedValue>,
+        ) => void),
+    cb?: (err?: string | null) => void,
+  ): void
+
   batch: RadixFunction & {
     acks: Array<(err?: string | null) => void>
     ed: number
@@ -32,9 +47,22 @@ export interface RadiskInterface extends RadixFunction {
     more?: boolean
   }
   save: (rad: RadixFunction, cb: (err?: string | null) => void) => void
-  write: (file: string, rad: RadixFunction, cb: (err?: string | null) => void) => void
-  read: (key: string, cb: (err?: string | null, value?: EncodedValue | Record<string, EncodedValue>) => void) => void
-  parse: (file: string, cb: (err?: string | null, disk?: RadixFunction) => void) => void
+  write: (
+    file: string,
+    rad: RadixFunction,
+    cb: (err?: string | null) => void,
+  ) => void
+  read: (
+    key: string,
+    cb: (
+      err?: string | null,
+      value?: EncodedValue | Record<string, EncodedValue>,
+    ) => void,
+  ) => void
+  parse: (
+    file: string,
+    cb: (err?: string | null, disk?: RadixFunction) => void,
+  ) => void
 }
 
 /**
@@ -48,7 +76,12 @@ const Radisk = (opt: RadiskOptions) => {
 
   const pendingReads = new Map<
     string,
-    Array<(err?: string | null, result?: EncodedValue | Record<string, EncodedValue>) => void>
+    Array<
+      (
+        err?: string | null,
+        result?: EncodedValue | Record<string, EncodedValue>,
+      ) => void
+    >
   >()
 
   let lastMemoryCheck = 0
@@ -67,21 +100,26 @@ const Radisk = (opt: RadiskOptions) => {
   }
 
   if (!options.store) {
-    throw new Error("Radisk needs `store` interface with `{get: fn, put: fn, list: fn}`")
+    throw new Error(
+      "Radisk needs `store` interface with `{get: fn, put: fn, list: fn}`",
+    )
   }
   if (!options.store.get) {
     throw new Error("Radisk needs `store.get` interface with `(file, cb)`")
   }
   if (!options.store.put) {
-    throw new Error("Radisk needs `store.put` interface with `(file, data, cb)`")
+    throw new Error(
+      "Radisk needs `store.put` interface with `(file, data, cb)`",
+    )
   }
   if (!options.store.list) {
-    throw new Error("Radisk needs a streaming `store.list` interface with `(cb)`")
+    throw new Error(
+      "Radisk needs a streaming `store.list` interface with `(cb)`",
+    )
   }
 
   // After validation, store is guaranteed to be defined
   const store = options.store
-
 
   const checkMemoryUsage = (): void => {
     if (typeof process === "undefined" || !process.memoryUsage) return
@@ -98,21 +136,31 @@ const Radisk = (opt: RadiskOptions) => {
     if (heapUsageRatio > HEAP_CLEANUP_THRESHOLD) {
       const cacheSize = cache.size
       console.log(
-        `[RADISK-MEMORY] High memory usage: ${Math.round(heapUsageRatio * 100)}% of heap limit. Clearing ${cacheSize} cached files.`
+        `[RADISK-MEMORY] High memory usage: ${Math.round(heapUsageRatio * 100)}% of heap limit. Clearing ${cacheSize} cached files.`,
       )
       cache.clear()
-      if ((global as { gc?: () => void }).gc) {
-        (global as { gc: () => void }).gc()
+      if ((global as {gc?: () => void}).gc) {
+        ;(global as {gc: () => void}).gc()
       }
       lastMemoryCheck = now + MEMORY_CHECK_INTERVAL
     } else if (heapUsageRatio > HEAP_WARNING_THRESHOLD) {
       console.log(
-        `[RADISK-MEMORY] Memory warning: ${Math.round(heapUsageRatio * 100)}% of heap limit used. Cache size: ${cache.size} files.`
+        `[RADISK-MEMORY] Memory warning: ${Math.round(heapUsageRatio * 100)}% of heap limit used. Cache size: ${cache.size} files.`,
       )
     }
   }
 
-  const radisk = ((key?: string, value?: GraphValue | EncodedValue | ((err?: string | null, value?: EncodedValue | Record<string, EncodedValue>) => void), cb?: (err?: string | null) => void) => {
+  const radisk = ((
+    key?: string,
+    value?:
+      | GraphValue
+      | EncodedValue
+      | ((
+          err?: string | null,
+          value?: EncodedValue | Record<string, EncodedValue>,
+        ) => void),
+    cb?: (err?: string | null) => void,
+  ) => {
     if (typeof key !== "string") return undefined
 
     if (typeof value === "function") {
@@ -261,7 +309,7 @@ const Radisk = (opt: RadiskOptions) => {
       done: false,
       count: 0,
       sub: undefined as RadixFunction | undefined,
-      halfKey: "",   // soul ID at the ~options.size/2 mark for a balanced split
+      halfKey: "", // soul ID at the ~options.size/2 mark for a balanced split
       halfOffset: 0, // write.text.length before that entry
       each: (
         value: EncodedValue,
@@ -289,8 +337,7 @@ const Radisk = (opt: RadiskOptions) => {
         ) {
           const fullKey = pre.join("") + k
           const endIdx = fullKey.indexOf(enq)
-          write.halfKey =
-            endIdx === -1 ? fullKey : fullKey.substring(0, endIdx)
+          write.halfKey = endIdx === -1 ? fullKey : fullKey.substring(0, endIdx)
           write.halfOffset = write.text.length
         }
 
@@ -342,20 +389,35 @@ const Radisk = (opt: RadiskOptions) => {
     const soul = endIdx === -1 ? key : key.substring(0, endIdx)
 
     const findFile = (files: string[]): string | null => {
-      let lo = 0, hi = files.length - 1, result: string | null = null
+      let lo = 0,
+        hi = files.length - 1,
+        result: string | null = null
       while (lo <= hi) {
         const mid = (lo + hi) >> 1
         const f = files[mid]!
-        if (f <= soul) { result = f; lo = mid + 1 }
-        else { hi = mid - 1 }
+        if (f <= soul) {
+          result = f
+          lo = mid + 1
+        } else {
+          hi = mid - 1
+        }
       }
       return result
     }
 
     const read = (file: string | null): void => {
-      if (!file) { cb("no file found", undefined); return }
+      if (!file) {
+        cb("no file found", undefined)
+        return
+      }
       if (options.cache && cache.has(file)) {
-        return cb(undefined, cache.get(file)!(key) as EncodedValue | Record<string, EncodedValue> | undefined)
+        return cb(
+          undefined,
+          cache.get(file)!(key) as
+            | EncodedValue
+            | Record<string, EncodedValue>
+            | undefined,
+        )
       }
       radisk.parse(file, (err, disk) => {
         if (err) options.log(err)
@@ -363,17 +425,32 @@ const Radisk = (opt: RadiskOptions) => {
           cache.set(file, disk)
           checkMemoryUsage()
         }
-        cb(err, disk ? disk(key) as EncodedValue | Record<string, EncodedValue> | undefined : undefined)
+        cb(
+          err,
+          disk
+            ? (disk(key) as
+                | EncodedValue
+                | Record<string, EncodedValue>
+                | undefined)
+            : undefined,
+        )
       })
     }
 
     const now = Date.now()
-    if (options.cache && fileListCache && now - fileListCacheTime < FILE_LIST_CACHE_TTL) {
+    if (
+      options.cache &&
+      fileListCache &&
+      now - fileListCacheTime < FILE_LIST_CACHE_TTL
+    ) {
       read(findFile(fileListCache))
     } else {
       const files: string[] = []
       store.list((file?: string) => {
-        if (file) { files.push(file); return }
+        if (file) {
+          files.push(file)
+          return
+        }
         files.sort()
         if (options.cache) {
           fileListCache = files
@@ -387,7 +464,10 @@ const Radisk = (opt: RadiskOptions) => {
   radisk.parse = (file, cb) => {
     const parse = {
       disk: Radix(),
-      read: (err?: string | null, data?: string | EncodedValue | Record<string, unknown>): void => {
+      read: (
+        err?: string | null,
+        data?: string | EncodedValue | Record<string, unknown>,
+      ): void => {
         if (err) return cb(err)
         if (!data) return cb(null, parse.disk)
 
@@ -398,7 +478,12 @@ const Radisk = (opt: RadiskOptions) => {
           let key: string | undefined
           let value: EncodedValue | undefined
           const tmpVal = tmp[1]
-          const i = typeof tmpVal === "number" ? tmpVal : (typeof tmpVal === "string" ? parseInt(tmpVal, 10) : 0)
+          const i =
+            typeof tmpVal === "number"
+              ? tmpVal
+              : typeof tmpVal === "string"
+                ? parseInt(tmpVal, 10)
+                : 0
           tmp = parse.split(tmp[2]) || ("" as never)
           if (tmp[0] === "#") {
             const tmpKey = tmp[1]
@@ -425,16 +510,14 @@ const Radisk = (opt: RadiskOptions) => {
         }
         cb(null, parse.disk)
       },
-      split: (
-        data: string
-      ): [string, unknown, string] | undefined => {
+      split: (data: string): [string, unknown, string] | undefined => {
         if (!data) return undefined
 
         const i = data.indexOf(unit)
         if (i === -1) return undefined
 
         const a = data.slice(0, i)
-        const o: { i?: number } = {}
+        const o: {i?: number} = {}
         return [a, Radisk.decode(data.slice(i), o), data.slice(i + o.i!)]
       },
     }
@@ -452,7 +535,7 @@ Radisk.encode = (input: EncodedValue | GraphValue): string => {
   let state = ""
   let sig = ""
   let data: GraphValue
-  
+
   if (Array.isArray(input) && (input.length === 2 || input.length === 3)) {
     // input is EncodedValue - extract the GraphValue and metadata
     state = etx + input[1]
@@ -492,7 +575,10 @@ Radisk.encode = (input: EncodedValue | GraphValue): string => {
 /**
  * Decode value from storage
  */
-Radisk.decode = (data: string, obj?: { i?: number }): EncodedValue | GraphValue | Relation | null | undefined => {
+Radisk.decode = (
+  data: string,
+  obj?: {i?: number},
+): EncodedValue | GraphValue | Relation | null | undefined => {
   let i = -1
   let n = 0
   let current: string | undefined = undefined
@@ -574,4 +660,3 @@ Radisk.decode = (data: string, obj?: { i?: number }): EncodedValue | GraphValue 
 }
 
 export default Radisk
-

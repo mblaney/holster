@@ -1,7 +1,11 @@
-import { describe, test } from "node:test"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Radisk from "../src/radisk.ts"
-import type { RadiskInterface, RadiskOptions, EncodedValue } from "../src/schemas.ts"
+import type {
+  RadiskInterface,
+  RadiskOptions,
+  EncodedValue,
+} from "../src/schemas.ts"
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)
@@ -18,7 +22,11 @@ describe("split file with shared prefix", () => {
       get: (file: string, cb: (err?: string, data?: EncodedValue) => void) => {
         cb(undefined, puts[file] as unknown as EncodedValue | undefined)
       },
-      put: (file: string, data: string | EncodedValue | Record<string, unknown>, cb: (err?: string) => void) => {
+      put: (
+        file: string,
+        data: string | EncodedValue | Record<string, unknown>,
+        cb: (err?: string) => void,
+      ) => {
         puts[file] = data as unknown as string
         cb(undefined)
       },
@@ -49,10 +57,14 @@ describe("split file with shared prefix", () => {
       assert.deepEqual(puts, {
         "!":
           '\x1F+0\x1F#\x1F"F\x1F\n' +
-          '\x1F+1\x1F#\x1F"a\x05x\x1F=\x1F"' + long + '\x031000\x1F\n',
-        "Fb":
+          '\x1F+1\x1F#\x1F"a\x05x\x1F=\x1F"' +
+          long +
+          "\x031000\x1F\n",
+        Fb:
           '\x1F+0\x1F#\x1F"F\x1F\n' +
-          '\x1F+1\x1F#\x1F"b\x05x\x1F=\x1F"' + long + '\x031000\x1F\n' +
+          '\x1F+1\x1F#\x1F"b\x05x\x1F=\x1F"' +
+          long +
+          "\x031000\x1F\n" +
           '\x1F+1\x1F#\x1F"c\x05x\x1F=\x1F"short\x031000\x1F\n',
       })
       done()
@@ -61,7 +73,9 @@ describe("split file with shared prefix", () => {
 
   test("reads back correctly after split", (t, done) => {
     let count = 0
-    const check = () => { if (++count === 3) done() }
+    const check = () => {
+      if (++count === 3) done()
+    }
     radisk("Fa" + enq + "x", (err?: string | null, value?: unknown) => {
       assert.deepEqual(value, [long, now])
       check()

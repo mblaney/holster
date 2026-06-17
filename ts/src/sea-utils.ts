@@ -4,7 +4,7 @@
  */
 
 import SafeBuffer from "./buffer.ts"
-import type { JWK } from "./schemas.ts"
+import type {JWK} from "./schemas.ts"
 
 const isNode = typeof process !== "undefined" && process.versions?.node != null
 
@@ -64,23 +64,20 @@ export const jwk = (pub: string, priv?: string): JWK => {
  */
 export const sha256 = async (data: unknown): Promise<SeaArray> => {
   const hash = await subtle.digest(
-    { name: "SHA-256" },
-    new TextEncoder().encode(stringify(data))
+    {name: "SHA-256"},
+    new TextEncoder().encode(stringify(data)),
   )
   return SafeBuffer.from(new Uint8Array(hash))
 }
 
 /**
- * Derive AES key from password and salt  
+ * Derive AES key from password and salt
  */
-export const aeskey = async (
-  key: string,
-  salt: SeaArray
-) => {
+export const aeskey = async (key: string, salt: SeaArray) => {
   const combined = key + salt.toString("utf8")
   const hashResult = await sha256(combined)
   const jwkKey = keyToJwk(hashResult)
-  return await subtle.importKey("jwk", jwkKey, { name: "AES-GCM" }, false, [
+  return await subtle.importKey("jwk", jwkKey, {name: "AES-GCM"}, false, [
     "encrypt",
     "decrypt",
   ])
@@ -95,9 +92,8 @@ const keyToJwk = (key: SeaArray): JWK => {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=/g, "")
-  return { kty: "oct", k: k, ext: false, alg: "A256GCM" }
+  return {kty: "oct", k: k, ext: false, alg: "A256GCM"}
 }
 
 // Re-export SeaArray type for convenience
 import type SeaArray from "./array.ts"
-

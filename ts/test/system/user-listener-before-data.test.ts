@@ -1,9 +1,9 @@
 import fs from "fs"
-import { Server} from "mock-socket"
-import { describe, test} from "node:test"
+import {Server} from "mock-socket"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Holster from "../../src/holster.ts"
-import type { HolsterAPI } from "../../src/holster.ts"
+import type {HolsterAPI} from "../../src/holster.ts"
 
 describe("system - user listener before data", () => {
   const wss: Server = new Server("ws://localhost:9017")
@@ -28,7 +28,7 @@ describe("system - user listener before data", () => {
 
     // Set up listener first before data exists
     user.get("testkey").on(data => {
-      results.push(data as { value: string } | null)
+      results.push(data as {value: string} | null)
     })
 
     // Give listener time to set up

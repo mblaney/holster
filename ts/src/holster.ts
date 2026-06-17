@@ -4,8 +4,8 @@
  */
 
 import * as utils from "./utils.ts"
-import Wire, { type WireAPI } from "./wire.ts"
-import User, { type UserInterface } from "./user.ts"
+import Wire, {type WireAPI} from "./wire.ts"
+import User, {type UserInterface} from "./user.ts"
 import SEA from "./sea.ts"
 import type {
   HolsterOptions,
@@ -25,31 +25,41 @@ import type {
  */
 export interface HolsterAPI {
   get: {
-    (key: string | null, lex?: LexWithDot, cb?: (data: unknown) => void, _opt?: WireOptions): HolsterAPI
+    (
+      key: string | null,
+      lex?: LexWithDot,
+      cb?: (data: unknown) => void,
+      _opt?: WireOptions,
+    ): HolsterAPI
     (
       key: string | null,
       cb?: (data: unknown) => void,
-      _opt?: WireOptions
+      _opt?: WireOptions,
     ): HolsterAPI
   }
   next: {
-    (key: string | null, lex?: LexWithDot, cb?: (data: unknown) => void, _opt?: WireOptions): HolsterAPI
+    (
+      key: string | null,
+      lex?: LexWithDot,
+      cb?: (data: unknown) => void,
+      _opt?: WireOptions,
+    ): HolsterAPI
     (
       key: string | null,
       cb?: (data: unknown) => void,
-      _opt?: WireOptions
+      _opt?: WireOptions,
     ): HolsterAPI
   }
   put: (
     data: GraphValue | Record<string, GraphValue>,
     set?: boolean | ((data?: string | null) => void),
-    cb?: (data?: string | null) => void
+    cb?: (data?: string | null) => void,
   ) => HolsterAPI | void
   on: (
     lex: LexWithDot | ((data: unknown) => void),
     cb?: ((data: unknown) => void) | boolean,
     _get?: boolean,
-    _opt?: WireOptions
+    _opt?: WireOptions,
   ) => void
   off: (cb?: (data: unknown) => void) => HolsterAPI | void
   user: () => UserInterface & HolsterAPI
@@ -59,8 +69,8 @@ export interface HolsterAPI {
 
 const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
   let options: HolsterOptions
-  if (typeof opt === "string") options = { peers: [opt] }
-  else if (opt instanceof Array) options = { peers: opt }
+  if (typeof opt === "string") options = {peers: [opt]}
+  else if (opt instanceof Array) options = {peers: opt}
   else if (!utils.obj.is(opt)) options = {}
   else options = opt
 
@@ -81,7 +91,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
   }
 
   const check = (
-    data: GraphValue | Record<string, GraphValue>
+    data: GraphValue | Record<string, GraphValue>,
   ): true | string | string[] => {
     if (ok(data as GraphValue)) return true
 
@@ -98,7 +108,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         if (typeof value === "undefined") {
           return `error undefined ${key} cannot be converted to a graph`
         }
-        const error = JSON.stringify({ [key]: value })
+        const error = JSON.stringify({[key]: value})
         return `error ${error} cannot be converted to a graph`
       }
       if (keys.length !== 0) return keys
@@ -113,44 +123,50 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       lex: LexFilter,
       soul: string,
       ack: (data: unknown) => void,
-      _opt?: WireOptions
+      _opt?: WireOptions,
     ): void => {
       wire.get(
         utils.obj.put(lex as never, "#", soul) as Lex,
         async msg => {
           if (msg.err) console.log(msg.err)
           if (msg.put && msg.put[soul]) {
-            delete (msg.put[soul] as { _?: unknown })._
-            delete (msg.put[soul] as Record<string, unknown>)[utils.userPublicKey]
-            delete (msg.put[soul] as Record<string, unknown>)[utils.userSignature]
+            delete (msg.put[soul] as {_?: unknown})._
+            delete (msg.put[soul] as Record<string, unknown>)[
+              utils.userPublicKey
+            ]
+            delete (msg.put[soul] as Record<string, unknown>)[
+              utils.userSignature
+            ]
             const node = msg.put[soul]!
-            await Promise.all(Object.keys(node).map(async key => {
-              const id = utils.rel.is(node[key] as GraphValue)
-              if (!id) return
-              const attemptRead = async (retries = 0): Promise<unknown> => {
-                const data = await new Promise<unknown>(res => {
-                  const _ctxid = utils.text.random()
-                  const ctx = allctx.get(ctxid!)
-                  allctx.set(_ctxid, {
-                    chain: [{ item: null, soul: id }],
-                    user: ctx ? ctx.user : null,
+            await Promise.all(
+              Object.keys(node).map(async key => {
+                const id = utils.rel.is(node[key] as GraphValue)
+                if (!id) return
+                const attemptRead = async (retries = 0): Promise<unknown> => {
+                  const data = await new Promise<unknown>(res => {
+                    const _ctxid = utils.text.random()
+                    const ctx = allctx.get(ctxid!)
+                    allctx.set(_ctxid, {
+                      chain: [{item: null, soul: id}],
+                      user: ctx ? ctx.user : null,
+                    })
+                    api(_ctxid).next(null as never, res as never, _opt)
                   })
-                  api(_ctxid).next(null as never, res as never, _opt)
-                })
-                if (data !== null || retries >= 5) {
-                  return data
+                  if (data !== null || retries >= 5) {
+                    return data
+                  }
+                  await new Promise(resolve => setTimeout(resolve, 50))
+                  return attemptRead(retries + 1)
                 }
-                await new Promise(resolve => setTimeout(resolve, 50))
-                return attemptRead(retries + 1)
-              }
-              node[key] = (await attemptRead()) as GraphValue
-            }))
+                node[key] = (await attemptRead()) as GraphValue
+              }),
+            )
             ack(msg.put[soul])
           } else {
             ack(null)
           }
         },
-        _opt
+        _opt,
       )
     }
 
@@ -158,7 +174,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       soul: string,
       data: Record<string, GraphValue>,
       userctx?: UserIdentity | null,
-      cb?: (err?: string) => void
+      cb?: (err?: string) => void,
     ): Promise<Graph | null> => {
       if (userctx) {
         const timestamp = Date.now()
@@ -192,53 +208,68 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       item: string,
       ctx: ApiContext,
       i: number,
-      request: { on?: LexFilter; get?: LexFilter; _get?: boolean; _opt?: WireOptions },
+      request: {
+        on?: LexFilter
+        get?: LexFilter
+        _get?: boolean
+        _opt?: WireOptions
+      },
       cb: (data: unknown) => void,
-      on = true
+      on = true,
     ): void => {
       let timer: ReturnType<typeof setTimeout> | null = null
       const handler = (): void => {
         // Bail out if the context was removed by off().
         if (!allctx.has(ctxid!)) {
-          wire.off({ "#": soul, ".": item }, handler)
+          wire.off({"#": soul, ".": item}, handler)
           if (timer) clearTimeout(timer)
           return
         }
         wire.get(
-          { "#": soul, ".": item },
+          {"#": soul, ".": item},
           msg => {
             const node = msg.put && msg.put[soul]
-            const id = utils.rel.is(node && node[item] as GraphValue)
+            const id = utils.rel.is(node && (node[item] as GraphValue))
             if (!id) {
               // If it's a plain value (not a rel) and this is a get, deliver it.
               // node._ guards against timeout null-acks which lack metadata.
               if (!on && node && node._ && typeof node[item] !== "undefined") {
                 if (timer) clearTimeout(timer)
-                wire.off({ "#": soul, ".": item }, handler)
+                wire.off({"#": soul, ".": item}, handler)
                 cb(node[item])
               }
               return
             }
             if (timer) clearTimeout(timer)
-            wire.off({ "#": soul, ".": item }, handler)
+            wire.off({"#": soul, ".": item}, handler)
             ctx.chain[i]!.soul = id
-            allctx.set(ctxid!, { ...ctx })
+            allctx.set(ctxid!, {...ctx})
             if (on) {
               api(ctxid).on(request.on!, cb, request._get, request._opt)
             } else {
-              api(ctxid).next(null as never, request.get as never, cb as never, request._opt)
+              api(ctxid).next(
+                null as never,
+                request.get as never,
+                cb as never,
+                request._opt,
+              )
             }
           },
-          { ...request._opt, secure: (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure }
+          {
+            ...request._opt,
+            secure:
+              (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) ||
+              options.secure,
+          },
         )
       }
-      wire.on({ "#": soul, ".": item }, handler, false, request._opt)
+      wire.on({"#": soul, ".": item}, handler, false, request._opt)
       // Time out after the same total duration as the on() retry loop
       // (1+2+4+8+16 = 31s) so callers are not blocked forever if the node
       // genuinely doesn't exist.
       if (!on) {
         timer = setTimeout(() => {
-          wire.off({ "#": soul, ".": item }, handler)
+          wire.off({"#": soul, ".": item}, handler)
           if (cb) cb(null)
         }, 31000)
       }
@@ -253,7 +284,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         _opt?: WireOptions
         _get?: boolean
       },
-      cb?: (data: unknown) => void
+      cb?: (data: unknown) => void,
     ): ChainItem | false => {
       if (!request) {
         console.log("error resolve request parameter required")
@@ -277,9 +308,9 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       if (found) {
         let i = 1
         while (i < ctx.chain.length && ctx.chain[i]!.soul !== null) i++
-        const { item, soul } = ctx.chain[i - 1]!
+        const {item, soul} = ctx.chain[i - 1]!
         wire.get(
-          { "#": soul!, ".": item! },
+          {"#": soul!, ".": item!},
           async msg => {
             if (msg.err) {
               console.log(`error getting ${item} on ${soul}: ${msg.err}`)
@@ -292,9 +323,14 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               let id = utils.rel.is(node[item!] as GraphValue)
               if (id) {
                 ctx.chain[i]!.soul = id
-                allctx.set(ctxid!, { ...ctx })
+                allctx.set(ctxid!, {...ctx})
                 if (get) {
-                  api(ctxid).next(null as never, request.get as never, cb as never, request._opt)
+                  api(ctxid).next(
+                    null as never,
+                    request.get as never,
+                    cb as never,
+                    request._opt,
+                  )
                 } else if (put) {
                   api(ctxid).put(request.put!, cb as never)
                 } else if (on) {
@@ -307,12 +343,19 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               } else if (put) {
                 id = utils.text.random()
                 node[item!] = utils.rel.ify(id)
-                const g = await graph(soul!, node as never, ctx.user, cb as never)
+                const g = await graph(
+                  soul!,
+                  node as never,
+                  ctx.user,
+                  cb as never,
+                )
                 if (g === null) return
 
                 wire.put(g, err => {
                   if (err) {
-                    (cb as (err: string) => void)(`error putting ${item} on ${soul}: ${err}`)
+                    ;(cb as (err: string) => void)(
+                      `error putting ${item} on ${soul}: ${err}`,
+                    )
                     return
                   }
                   if (id) {
@@ -337,7 +380,9 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
 
               wire.put(g, err => {
                 if (err) {
-                  (cb as (err: string) => void)(`error putting ${item} on ${soul}: ${err}`)
+                  ;(cb as (err: string) => void)(
+                    `error putting ${item} on ${soul}: ${err}`,
+                  )
                   return
                 }
                 ctx.chain[i]!.soul = id
@@ -349,8 +394,16 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                 watchForRel(soul!, item!, ctx, i, request, cb!)
                 if (request._get) cb!(null)
               } else if (get && node) {
-                const sv = (node as Record<string, unknown> & {_?: {">": Record<string, unknown>}})._?.[">"]
-                if (sv && Object.keys(sv).length > 0 && typeof sv[item!] === "undefined") {
+                const sv = (
+                  node as Record<string, unknown> & {
+                    _?: {">": Record<string, unknown>}
+                  }
+                )._?.[">"]
+                if (
+                  sv &&
+                  Object.keys(sv).length > 0 &&
+                  typeof sv[item!] === "undefined"
+                ) {
                   // State vector has other properties but not this one — never written.
                   if (cb) cb(null)
                 } else {
@@ -363,14 +416,24 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               }
             }
           },
-          { ...request._opt, secure: (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure }
+          {
+            ...request._opt,
+            secure:
+              (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) ||
+              options.secure,
+          },
         )
         return false
       }
 
       if (get && ctx.chain[ctx.chain.length - 1]!.item !== null) {
-        ctx.chain.push({ item: null, soul: null })
-        api(ctxid).next(null as never, request.get as never, cb as never, request._opt)
+        ctx.chain.push({item: null, soul: null})
+        api(ctxid).next(
+          null as never,
+          request.get as never,
+          cb as never,
+          request._opt,
+        )
         return false
       }
 
@@ -383,7 +446,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         key: string | null,
         lex?: LexFilter | ((data: unknown) => void),
         cb?: ((data: unknown) => void) | WireOptions,
-        _opt?: WireOptions
+        _opt?: WireOptions,
       ): HolsterAPI {
         let lexFilter: LexFilter | null | undefined
         let callback: ((data: unknown) => void) | undefined
@@ -412,13 +475,13 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
 
         ctxid = utils.text.random()
         allctx.set(ctxid, {
-          chain: [{ item: String(key), soul: "root" }],
+          chain: [{item: String(key), soul: "root"}],
           cb: callback,
         })
         if (!callback) return api(ctxid)
 
         const _done = done(ctxid)
-        const result = resolve({ get: lexFilter, _opt: opts }, _done)
+        const result = resolve({get: lexFilter, _opt: opts}, _done)
         if (result) get(lexFilter as never, result.soul!, _done, opts)
         return this
       } as HolsterAPI["get"],
@@ -428,7 +491,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         key: string | null,
         lex?: LexFilter | ((data: unknown) => void),
         cb?: ((data: unknown) => void) | WireOptions,
-        _opt?: WireOptions
+        _opt?: WireOptions,
       ): HolsterAPI {
         let lexFilter: LexFilter | null | undefined
         let callback: ((data: unknown) => void) | undefined
@@ -479,10 +542,10 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           callback = undefined
         }
 
-        if (key !== null) ctx.chain.push({ item: String(key), soul: null })
+        if (key !== null) ctx.chain.push({item: String(key), soul: null})
         if (!ctx.cb) return api(ctxid)
 
-        const result = resolve({ get: lexFilter, _opt: opts }, _ack)
+        const result = resolve({get: lexFilter, _opt: opts}, _ack)
         if (result) get(lexFilter as never, result.soul!, _ack, opts)
         return this
       } as HolsterAPI["next"],
@@ -490,7 +553,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       put: function (
         data: GraphValue | Record<string, GraphValue>,
         set?: boolean | ((data?: string | null) => void),
-        cb?: (data?: string | null) => void
+        cb?: (data?: string | null) => void,
       ): HolsterAPI | void {
         let isSet = false
         let callback: ((data?: string | null) => void) | undefined
@@ -526,7 +589,8 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           callback = undefined
         }
 
-        if (isSet) data = { [utils.text.random()]: data } as Record<string, GraphValue>
+        if (isSet)
+          data = {[utils.text.random()]: data} as Record<string, GraphValue>
 
         const _ack = ack(ctxid)
         const result = check(data)
@@ -535,15 +599,15 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           return
         }
 
-        const resolved = resolve({ put: data, _opt: {put: true} }, _ack as never)
+        const resolved = resolve({put: data, _opt: {put: true}}, _ack as never)
         if (!resolved) return
 
-        const { item, soul } = resolved
+        const {item, soul} = resolved
         if (!soul) return
 
         if (result === true) {
           wire.get(
-            { "#": soul, ".": item! },
+            {"#": soul, ".": item!},
             async msg => {
               if (msg.err) {
                 _ack(`error getting ${soul}: ${msg.err}`)
@@ -556,14 +620,19 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               if (!id) {
                 if (!node) node = {} as never
                 node[item!] = (isSet ? data : data) as GraphValue
-                const g = await graph(soul, node as never, ctx.user, _ack as never)
+                const g = await graph(
+                  soul,
+                  node as never,
+                  ctx.user,
+                  _ack as never,
+                )
                 if (g === null) return
 
                 wire.put(g, _ack as never)
                 return
               }
 
-              wire.get({ "#": id }, async msg => {
+              wire.get({"#": id}, async msg => {
                 if (msg.err) {
                   _ack(`error getting ${id}: ${msg.err}`)
                   return
@@ -583,12 +652,14 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                     continue
                   }
 
-                  const err = await new Promise<string | null | undefined>(res => {
-                    const _ctxid = utils.text.random()
-                    const chain: ChainItem[] = [{ item: key, soul: id }]
-                    allctx.set(_ctxid, { chain: chain, user: ctx.user })
-                    api(_ctxid).put(null!, res as never)
-                  })
+                  const err = await new Promise<string | null | undefined>(
+                    res => {
+                      const _ctxid = utils.text.random()
+                      const chain: ChainItem[] = [{item: key, soul: id}]
+                      allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                      api(_ctxid).put(null!, res as never)
+                    },
+                  )
                   if (err) {
                     _ack(err)
                     return
@@ -596,20 +667,30 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                 }
                 if (!node) node = {} as never
                 node[item!] = data as GraphValue
-                const g = await graph(soul, node as never, ctx.user, _ack as never)
+                const g = await graph(
+                  soul,
+                  node as never,
+                  ctx.user,
+                  _ack as never,
+                )
                 if (g === null) return
 
                 wire.put(g, _ack as never)
               })
             },
-            { secure: (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure, put: true }
+            {
+              secure:
+                (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) ||
+                options.secure,
+              put: true,
+            },
           )
           return
         }
 
         const attemptRead = (retries = 0): void => {
           wire.get(
-            { "#": soul, ".": item! },
+            {"#": soul, ".": item!},
             async msg => {
               if (msg.err) {
                 _ack(`error getting ${soul}.${item}: ${msg.err}`)
@@ -628,7 +709,12 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               if (!id) {
                 if (!node) node = {} as never
                 node[item!] = utils.rel.ify(utils.text.random())
-                const g = await graph(soul, node as never, ctx.user, _ack as never)
+                const g = await graph(
+                  soul,
+                  node as never,
+                  ctx.user,
+                  _ack as never,
+                )
                 if (g === null) return
 
                 wire.put(g, err => {
@@ -636,7 +722,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                     _ack(`error putting ${item} on ${soul}: ${err}`)
                   } else {
                     const _ctxid = utils.text.random()
-                    const chain: ChainItem[] = [{ item: item!, soul: soul }]
+                    const chain: ChainItem[] = [{item: item!, soul: soul}]
                     allctx.set(_ctxid, {
                       chain: chain,
                       user: ctx.user,
@@ -650,20 +736,25 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
 
               const update: string[] = []
               for (const key of result as string[]) {
-                const err = await new Promise<string | null | undefined>(res => {
-                  if (
-                    utils.obj.is((data as Record<string, unknown>)[key]) &&
-                    !utils.rel.is((data as Record<string, GraphValue>)[key])
-                  ) {
-                    const _ctxid = utils.text.random()
-                    const chain: ChainItem[] = [{ item: key, soul: id }]
-                    allctx.set(_ctxid, { chain: chain, user: ctx.user })
-                    api(_ctxid).put((data as Record<string, GraphValue>)[key]!, res as never)
-                  } else {
-                    update.push(key)
-                    res(null)
-                  }
-                })
+                const err = await new Promise<string | null | undefined>(
+                  res => {
+                    if (
+                      utils.obj.is((data as Record<string, unknown>)[key]) &&
+                      !utils.rel.is((data as Record<string, GraphValue>)[key])
+                    ) {
+                      const _ctxid = utils.text.random()
+                      const chain: ChainItem[] = [{item: key, soul: id}]
+                      allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                      api(_ctxid).put(
+                        (data as Record<string, GraphValue>)[key]!,
+                        res as never,
+                      )
+                    } else {
+                      update.push(key)
+                      res(null)
+                    }
+                  },
+                )
                 if (err) {
                   _ack(err)
                   return
@@ -681,12 +772,22 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               update.forEach(key => {
                 updateNode[key] = (data as Record<string, GraphValue>)[key]!
               })
-              const g = await graph(id, updateNode as never, ctx.user, _ack as never)
+              const g = await graph(
+                id,
+                updateNode as never,
+                ctx.user,
+                _ack as never,
+              )
               if (g === null) return
 
               wire.put(g, _ack as never)
             },
-            { secure: (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure, put: true }
+            {
+              secure:
+                (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) ||
+                options.secure,
+              put: true,
+            },
           )
         }
         attemptRead()
@@ -696,7 +797,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         lex: LexWithDot | ((data: unknown) => void),
         cb?: ((data: unknown) => void) | boolean,
         _get?: boolean,
-        _opt?: WireOptions
+        _opt?: WireOptions,
       ): void {
         let lexFilter: LexFilter | undefined
         let callback: (data: unknown) => void
@@ -724,16 +825,19 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           return
         }
 
-        const resolved = resolve({ on: lexFilter, _get: _get, _opt: opts }, callback)
+        const resolved = resolve(
+          {on: lexFilter, _get: _get, _opt: opts},
+          callback,
+        )
         if (!resolved) return
 
-        const { item, soul } = resolved
+        const {item, soul} = resolved
         if (!soul) return
 
         const ctx = allctx.get(ctxid)
 
         allctx.set(ctxid, {
-          chain: [{ item: item, soul: soul }],
+          chain: [{item: item, soul: soul}],
           on: true,
           user: ctx ? ctx.user : null,
         })
@@ -755,7 +859,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           clearTimeout(retryTimer!)
           retryTimer = null
           wire.get(
-            { "#": soul, ".": item! },
+            {"#": soul, ".": item!},
             msg => {
               const node = msg.put && msg.put[soul]
               const current = node && node[item!]
@@ -765,10 +869,16 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                   const data = await new Promise<unknown>(res => {
                     const _ctxid = utils.text.random()
                     allctx.set(_ctxid, {
-                      chain: [{ item: null, soul: id }],
+                      chain: [{item: null, soul: id}],
                       user: ctx ? ctx.user : null,
                     })
-                    api(_ctxid).next(null as never, res as never, (retries === 0 ? utils.obj.put(opts, "fast", true) : opts) as never)
+                    api(_ctxid).next(
+                      null as never,
+                      res as never,
+                      (retries === 0
+                        ? utils.obj.put(opts, "fast", true)
+                        : opts) as never,
+                    )
                   })
                   if (data !== null || retries >= 5) {
                     retryCount = 0
@@ -789,20 +899,32 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                   // exhaust retries. on() with _get can return null on a cache
                   // miss and never fire again if the data doesn't change while
                   // the listener is attached, so we must poll for initial load.
-                  const secureOpt = { ...opts, secure: ctx ? ((typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure) : options.secure }
+                  const secureOpt = {
+                    ...opts,
+                    secure: ctx
+                      ? (typeof ctx.user === "boolean"
+                          ? ctx.user
+                          : !!ctx.user) || options.secure
+                      : options.secure,
+                  }
                   const retry = (): void => {
-                    const delay = Math.min(retryDelay * Math.pow(2, retryCount), 30000)
+                    const delay = Math.min(
+                      retryDelay * Math.pow(2, retryCount),
+                      30000,
+                    )
                     retryCount++
                     retryTimer = setTimeout(() => {
                       wire.get(
-                        { "#": soul, ".": item! },
+                        {"#": soul, ".": item!},
                         retryMsg => {
                           const retryNode = retryMsg.put && retryMsg.put[soul]
                           if (retryNode) {
                             retryCount = 0
                             retryTimer = null
                             const retryValue = retryNode[item!]
-                            callback(retryValue !== undefined ? retryValue : null)
+                            callback(
+                              retryValue !== undefined ? retryValue : null,
+                            )
                           } else if (retryCount < maxRetries) {
                             retry()
                           } else {
@@ -820,20 +942,29 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                 }
               }
             },
-            { ...opts, secure: ctx ? ((typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure) : options.secure }
+            {
+              ...opts,
+              secure: ctx
+                ? (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) ||
+                  options.secure
+                : options.secure,
+            },
           )
         })
 
-        let initialLex: { "#": string; "."?: string | number } = lexFilter
-          ? (utils.obj.put(lexFilter as never, "#", soul) as { "#": string; "."?: string | number })
-          : { "#": soul, ".": item! }
+        let initialLex: {"#": string; "."?: string | number} = lexFilter
+          ? (utils.obj.put(lexFilter as never, "#", soul) as {
+              "#": string
+              "."?: string | number
+            })
+          : {"#": soul, ".": item!}
         if (initialLex["."] != null && typeof initialLex["."] === "number") {
-          initialLex = { ...initialLex, ".": String(initialLex["."]) }
+          initialLex = {...initialLex, ".": String(initialLex["."])}
         }
         wire.on(initialLex as never, map.get(callback)!, false, opts)
 
         wire.get(
-          { "#": soul, ".": item! },
+          {"#": soul, ".": item!},
           msg => {
             if (msg.err) {
               console.log(`error getting ${soul}.${item}: ${msg.err}`)
@@ -844,14 +975,25 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
             const id = utils.rel.is(current as GraphValue)
             if (id) {
               wire.off(initialLex as never, map.get(callback)!)
-              wire.on({ "#": id, ".": null } as never, map.get(callback)!, false, opts)
+              wire.on(
+                {"#": id, ".": null} as never,
+                map.get(callback)!,
+                false,
+                opts,
+              )
               if (_get) map.get(callback)!()
             } else if (_get) {
               // Not a rel, but _get was requested, so trigger callback.
               map.get(callback)!()
             }
           },
-          { ...opts, secure: ctx ? ((typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) || options.secure) : options.secure }
+          {
+            ...opts,
+            secure: ctx
+              ? (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) ||
+                options.secure
+              : options.secure,
+          },
         )
       },
 
@@ -862,15 +1004,15 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           return
         }
 
-        const resolved = resolve({ off: true }, cb)
+        const resolved = resolve({off: true}, cb)
         if (!resolved) return
 
-        const { item, soul } = resolved
+        const {item, soul} = resolved
         if (!soul) return
 
-        wire.off({ "#": soul } as never, map.get(cb!)!)
+        wire.off({"#": soul} as never, map.get(cb!)!)
 
-        wire.get({ "#": soul, ".": item! }, msg => {
+        wire.get({"#": soul, ".": item!}, msg => {
           if (msg.err) {
             map.delete(cb!)
             allctx.delete(ctxid!)
@@ -879,21 +1021,21 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
 
           const current = msg.put && msg.put[soul] && msg.put[soul]![item!]
           const id = utils.rel.is(current as GraphValue)
-          if (id) wire.off({ "#": id } as never, map.get(cb!)!)
+          if (id) wire.off({"#": id} as never, map.get(cb!)!)
           map.delete(cb!)
           allctx.delete(ctxid!)
         })
       },
 
       user: () => {
-        if (!(user as { get?: unknown }).get) {
+        if (!(user as {get?: unknown}).get) {
           Object.assign(user, api())
           ;(user as UserInterface & HolsterAPI).get = function (
             this: HolsterAPI,
             keys: string | string[],
             lex?: LexFilter | ((data: unknown) => void),
             cb?: ((data: unknown) => void) | WireOptions,
-            _opt?: WireOptions
+            _opt?: WireOptions,
           ): HolsterAPI {
             let lexFilter: LexFilter | null | undefined
             let callback: ((data: unknown) => void) | undefined
@@ -940,12 +1082,16 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
             }
 
             ctxid = utils.text.random()
-            const chain: ChainItem[] = [{ item: String(key), soul: "~" + pub }]
-            allctx.set(ctxid, { chain: chain, user: user.is, cb: callback as never })
+            const chain: ChainItem[] = [{item: String(key), soul: "~" + pub}]
+            allctx.set(ctxid, {
+              chain: chain,
+              user: user.is,
+              cb: callback as never,
+            })
             if (!callback) return api(ctxid)
 
             const _done = done(ctxid)
-            const resolved = resolve({ get: lexFilter, _opt: opts }, _done)
+            const resolved = resolve({get: lexFilter, _opt: opts}, _done)
             if (resolved) get(lexFilter as never, resolved.soul!, _done, opts)
             return this
           } as never
@@ -961,4 +1107,3 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
 }
 
 export default Holster
-

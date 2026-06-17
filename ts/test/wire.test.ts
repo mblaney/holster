@@ -1,31 +1,37 @@
 import fs from "fs"
-import { Server } from "mock-socket"
-import { describe, test } from "node:test"
+import {Server} from "mock-socket"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Wire from "../src/wire.ts"
-import type { WireInterface } from "../src/schemas.ts"
+import type {WireInterface} from "../src/schemas.ts"
 
 describe("wire", () => {
   // Need different websocket servers otherwise data on file will sync up.
   const wss1: Server = new Server("ws://localhost:1234")
-  const kitty: WireInterface = Wire({ file: "test/kitty", wss: wss1 })
+  const kitty: WireInterface = Wire({file: "test/kitty", wss: wss1})
 
   const wss2: Server = new Server("ws://localhost:1235")
-  const wire: WireInterface = Wire({ file: "test/wire", wss: wss2 })
+  const wire: WireInterface = Wire({file: "test/wire", wss: wss2})
 
   const ws: WebSocket = new WebSocket("ws://localhost:1235")
 
   const wss3: Server = new Server("ws://localhost:1236")
-  const batchWire: WireInterface = Wire({ file: "test/batch-wire", wss: wss3 })
+  const batchWire: WireInterface = Wire({file: "test/batch-wire", wss: wss3})
 
   const wss4: Server = new Server("ws://localhost:1237")
-  const secureWire: WireInterface = Wire({ file: "test/secure-wire", wss: wss4 })
+  const secureWire: WireInterface = Wire({file: "test/secure-wire", wss: wss4})
 
   const wss5: Server = new Server("ws://localhost:1238")
-  const reconnectWire: WireInterface = Wire({ file: "test/reconnect-wire", peers: ["ws://localhost:1238"] })
+  const reconnectWire: WireInterface = Wire({
+    file: "test/reconnect-wire",
+    peers: ["ws://localhost:1238"],
+  })
 
   // Client-mode wire connecting to a port with no server — always offline.
-  const offlineWire: WireInterface = Wire({ file: "test/offline-wire", peers: ["ws://localhost:1239"] })
+  const offlineWire: WireInterface = Wire({
+    file: "test/offline-wire",
+    peers: ["ws://localhost:1239"],
+  })
 
   // ws3 responds to a get for "batch_parent" with a put batch where
   // "batch_child" appears before "batch_parent" to exercise the pre-pass.
@@ -43,11 +49,11 @@ describe("wire", () => {
           "#": "batch_response",
           "@": msg["#"],
           put: {
-            "batch_child": {
+            batch_child: {
               _: {"#": "batch_child", ">": {data: 1}},
               data: "child value",
             },
-            "batch_parent": {
+            batch_parent: {
               _: {"#": "batch_parent", ">": {child: 1}},
               child: {"#": "batch_child"},
             },
@@ -65,15 +71,18 @@ describe("wire", () => {
   ws4.onmessage = (m: MessageEvent) => {
     const msg = JSON.parse(m.data as string)
     if (!msg.get) return
-    if (msg.get["#"] === "secure_test_soul" && msg.get["."] === "missing_prop") {
+    if (
+      msg.get["#"] === "secure_test_soul" &&
+      msg.get["."] === "missing_prop"
+    ) {
       ws4.send(
         JSON.stringify({
           "#": "secure_prop_ack",
           "@": msg["#"],
           put: {
-            "secure_test_soul": {
-              _: {"#": "secure_test_soul", ">": {"missing_prop": 3}},
-              "missing_prop": "found_on_wire",
+            secure_test_soul: {
+              _: {"#": "secure_test_soul", ">": {missing_prop: 3}},
+              missing_prop: "found_on_wire",
             },
           },
         }),
@@ -229,23 +238,20 @@ describe("wire", () => {
     const pubKey = "_holster_user_public_key"
     secureWire.put(
       {
-        "secure_test_soul": {
+        secure_test_soul: {
           _: {"#": "secure_test_soul", ">": {[pubKey]: 1}},
           [pubKey]: "testpubkey",
         },
       },
       err => {
         assert.equal(err, null)
-        secureWire.get(
-          {"#": "secure_test_soul", ".": "missing_prop"},
-          msg => {
-            assert.equal(
-              (msg.put?.["secure_test_soul"] as any)?.["missing_prop"],
-              "found_on_wire",
-            )
-            done()
-          },
-        )
+        secureWire.get({"#": "secure_test_soul", ".": "missing_prop"}, msg => {
+          assert.equal(
+            (msg.put?.["secure_test_soul"] as any)?.["missing_prop"],
+            "found_on_wire",
+          )
+          done()
+        })
       },
     )
   })
@@ -314,10 +320,14 @@ describe("wire", () => {
             assert.equal(err, null)
             fs.rm("test/offline-wire", {recursive: true, force: true}, err => {
               assert.equal(err, null)
-              fs.rm("test/reconnect-wire", {recursive: true, force: true}, err => {
-                assert.equal(err, null)
-                done()
-              })
+              fs.rm(
+                "test/reconnect-wire",
+                {recursive: true, force: true},
+                err => {
+                  assert.equal(err, null)
+                  done()
+                },
+              )
             })
           })
         })

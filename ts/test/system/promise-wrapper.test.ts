@@ -1,13 +1,16 @@
 import fs from "fs"
-import { Server} from "mock-socket"
-import { describe, test} from "node:test"
+import {Server} from "mock-socket"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Holster from "../../src/holster.ts"
-import type { HolsterAPI } from "../../src/holster.ts"
+import type {HolsterAPI} from "../../src/holster.ts"
 
 describe("system - promise wrapped calls", () => {
   const wss: Server = new Server("ws://localhost:9004")
-  const holster: HolsterAPI = Holster({file: "test/system/promise-wrapper", wss: wss})
+  const holster: HolsterAPI = Holster({
+    file: "test/system/promise-wrapper",
+    wss: wss,
+  })
 
   test("promise wrapped get returns null for missing key", async t => {
     const data = await new Promise(res => {
@@ -25,7 +28,7 @@ describe("system - promise wrapped calls", () => {
       holster.get("key", res)
     })
     assert.notEqual(data, null)
-    assert.equal((data as { value: string }).value, "test")
+    assert.equal((data as {value: string}).value, "test")
   })
 
   test("promise wrapped next returns null for missing nested key", async t => {

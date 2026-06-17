@@ -1,7 +1,11 @@
-import { describe, test } from "node:test"
+import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Radisk from "../src/radisk.ts"
-import type { RadiskInterface, RadiskOptions, EncodedValue } from "../src/schemas.ts"
+import type {
+  RadiskInterface,
+  RadiskOptions,
+  EncodedValue,
+} from "../src/schemas.ts"
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)
@@ -14,7 +18,11 @@ describe("split", () => {
       get: (file: string, cb: (err?: string, data?: EncodedValue) => void) => {
         cb(undefined, puts[file] as unknown as EncodedValue | undefined)
       },
-      put: (file: string, data: string | EncodedValue | Record<string, unknown>, cb: (err?: string) => void) => {
+      put: (
+        file: string,
+        data: string | EncodedValue | Record<string, unknown>,
+        cb: (err?: string) => void,
+      ) => {
         puts[file] = data as unknown as string
         cb(undefined)
       },
@@ -118,7 +126,7 @@ describe("split", () => {
     radisk("parent" + enq + "string", ["parent value", now])
     radisk("parent" + enq + "number", [42, now])
     radisk("parent" + enq + "boolean", [true, now])
-    radisk("parent" + enq + "rel", [{ "#": "child" }, now])
+    radisk("parent" + enq + "rel", [{"#": "child"}, now])
 
     setTimeout(() => {
       assert.deepEqual(puts, {
@@ -132,7 +140,7 @@ describe("split", () => {
     radisk("child" + enq + "string", ["child value", now])
     radisk("child" + enq + "number", [43, now])
     radisk("child" + enq + "boolean", [true, now])
-    radisk("child" + enq + "rel", [{ "#": "grandchild" }, now])
+    radisk("child" + enq + "rel", [{"#": "grandchild"}, now])
 
     setTimeout(() => {
       assert.deepEqual(puts, {
@@ -147,7 +155,7 @@ describe("split", () => {
     radisk("grandchild" + enq + "string", ["grandchild value", now])
     radisk("grandchild" + enq + "number", [44, now])
     radisk("grandchild" + enq + "boolean", [false, now])
-    radisk("grandchild" + enq + "rel", [{ "#": "toys" }, now])
+    radisk("grandchild" + enq + "rel", [{"#": "toys"}, now])
 
     setTimeout(() => {
       assert.deepEqual(puts, {
@@ -179,7 +187,7 @@ describe("split", () => {
     radisk("alpha" + enq + "string", ["alpha value", now])
     radisk("alpha" + enq + "number", [1, now])
     radisk("alpha" + enq + "boolean", [true, now])
-    radisk("alpha" + enq + "rel", [{ "#": "beta" }, now])
+    radisk("alpha" + enq + "rel", [{"#": "beta"}, now])
     radisk("beta" + enq + "string", ["beta value", now])
 
     setTimeout(() => {
@@ -316,4 +324,3 @@ describe("split", () => {
     }, 10)
   })
 })
-

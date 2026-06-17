@@ -7,6 +7,7 @@ import * as utils from "./utils.js"
 const isNode = typeof process !== "undefined" && process.versions?.node != null
 
 const wsModule = isNode ? await import("ws") : undefined
+const fs = isNode ? await import(/*webpackIgnore: true*/ "node:fs") : undefined
 
 if (typeof globalThis.WebSocket === "undefined") {
   globalThis.WebSocket = wsModule?.WebSocket
@@ -210,6 +211,109 @@ const Wire = opt => {
   const rateLimiter = createRateLimiter(isTestEnv)
   const connectionManager = createConnectionManager(opt.maxConnections || 1000)
 
+  // User storage limiting — server-side only, requires opt.userLimit: true.
+  const DEFAULT_STORAGE_LIMIT = 1 // 1 MB
+  const defaultLimit =
+    (typeof opt.defaultLimit === "number"
+      ? opt.defaultLimit
+      : DEFAULT_STORAGE_LIMIT) * 1048576
+  const userStorage = new Map() // Map<pubkey, totalBytes>
+  const userLimits = new Map() // Map<pubkey, maxBytes> converted from MB in .user_limit.json
+  let saveStorageTimer = null
+
+  const loadUserStorage = cb => {
+    fs.readFile(`${opt.file}/../.user_storage.json`, "utf8", (err, raw) => {
+      if (err) {
+        if (cb) cb()
+        return
+      }
+
+      try {
+        const data = JSON.parse(raw)
+        userStorage.clear()
+        for (const [pub, total] of Object.entries(data)) {
+          if (typeof total === "number") userStorage.set(pub, total)
+        }
+      } catch {
+        // Invalid JSON — start with empty map.
+      }
+      if (cb) cb()
+    })
+  }
+
+  const saveUserStorage = () => {
+    if (saveStorageTimer) return
+
+    const t = setTimeout(() => {
+      saveStorageTimer = null
+      const data = {}
+      for (const [pub, total] of userStorage) {
+        data[pub] = total
+      }
+      fs.writeFile(
+        `${opt.file}/../.user_storage.json`,
+        JSON.stringify(data),
+        err => {
+          if (err) console.warn("saveUserStorage error:", err)
+        },
+      )
+    }, 5000)
+    if (t.unref) t.unref()
+    saveStorageTimer = t
+  }
+
+  const loadUserLimits = cb => {
+    fs.readFile(`${opt.file}/../.user_limit.json`, "utf8", (err, raw) => {
+      if (err) {
+        if (cb) cb()
+        return
+      }
+      try {
+        const data = JSON.parse(raw)
+        userLimits.clear()
+        for (const [pub, limit] of Object.entries(data)) {
+          if (typeof limit === "number") userLimits.set(pub, limit * 1048576)
+          // Non-numeric values ignored, falls back to defaultLimit.
+        }
+      } catch {
+        // Invalid JSON — userLimits stays empty.
+      }
+      if (cb) cb()
+    })
+  }
+
+  const formatBytes = bytes => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`
+    if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`
+    return `${(bytes / 1073741824).toFixed(1)} GB`
+  }
+
+  const logStorageSummary = () => {
+    const userCount = userStorage.size
+    const defLimitStr =
+      defaultLimit === 0
+        ? "0 B (unlisted users blocked)"
+        : formatBytes(defaultLimit)
+    console.log(
+      `[HOLSTER] Per-user storage limits enabled (${userCount} user${userCount !== 1 ? "s" : ""}, default: ${defLimitStr})`,
+    )
+    const sorted = [...userStorage.entries()].sort(([, a], [, b]) => b - a)
+    const formatUser = pub => {
+      const total = userStorage.get(pub) ?? 0
+      const limit = userLimits.get(pub) ?? defaultLimit
+      const limitStr = limit === 0 ? "0 B (blocked)" : formatBytes(limit)
+      return `  ${pub} — used: ${formatBytes(total)} / limit: ${limitStr}`
+    }
+    if (userCount <= 5) {
+      sorted.forEach(([pub]) => console.log(formatUser(pub)))
+    } else {
+      console.log("  Top 5 by storage used:")
+      sorted.slice(0, 5).forEach(([pub]) => console.log(formatUser(pub)))
+      console.log(`  Run \`node examples/user-storage.js\` to view all users`)
+    }
+  }
+
   // The check function is required because user data must provide a public key
   // so that it can be verified. The public key might verify the provided
   // signature but not actually match the user under which the data is being
@@ -236,11 +340,7 @@ const Wire = opt => {
       // matching public keys, as the provided soul also needs a rel on the
       // parent node which then also requires checking. Otherwise public keys
       // need to match for existing data.
-      if (
-        !msg.put ||
-        !msg.put[soul] ||
-        msg.put[soul][key] === node[key]
-      ) {
+      if (!msg.put || !msg.put[soul] || msg.put[soul][key] === node[key]) {
         continue
       }
 
@@ -284,8 +384,25 @@ const Wire = opt => {
   }
 
   const put = async (msg, send) => {
+    // Capture old graph sizes before Ham.mix updates graph in place.
+    const oldGraphBytes = {}
+    if (opt.userLimit) {
+      for (const [soul, node] of Object.entries(msg.put)) {
+        if (node && node[utils.userPublicKey] && graph[soul]) {
+          oldGraphBytes[soul] = JSON.stringify(graph[soul]).length
+        }
+      }
+    }
+
     // Store updates returned from Ham.mix and defer updates if required.
-    const update = await Ham.mix(msg.put, graph, hasNode, opt.secure, listen)
+    const update = await Ham.mix(
+      msg.put,
+      graph,
+      hasNode,
+      opt.secure,
+      listen,
+      opt.maxGraphSize,
+    )
     if (Object.keys(update.now).length === 0) {
       // No updates to store, check deferred.
       if (Object.keys(update.defer).length !== 0) {
@@ -299,7 +416,7 @@ const Wire = opt => {
 
     if (!(await check(update.now, send))) return
 
-    store.put(update.now, err => {
+    const finish = err => {
       if (err) console.warn("store.put", err)
       send(
         JSON.stringify({
@@ -310,7 +427,35 @@ const Wire = opt => {
       )
       // Fire listeners after data is stored
       update.listeners.forEach(cb => cb())
-    })
+    }
+
+    if (!opt.userLimit) {
+      store.put(update.now, finish)
+    } else {
+      const toStore = {}
+      for (const [soul, node] of Object.entries(update.now)) {
+        const pub = node[utils.userPublicKey]
+        if (!pub) {
+          toStore[soul] = node
+          continue
+        }
+        const limit = userLimits.get(pub) ?? defaultLimit
+        if ((userStorage.get(pub) ?? 0) >= limit) continue
+        toStore[soul] = node
+        const oldBytes = oldGraphBytes[soul] ?? 0
+        const newBytes = JSON.stringify(node).length
+        userStorage.set(
+          pub,
+          Math.max(0, (userStorage.get(pub) ?? 0) - oldBytes + newBytes),
+        )
+        saveUserStorage()
+      }
+      if (Object.keys(toStore).length > 0) {
+        store.put(toStore, finish)
+      } else {
+        finish(null)
+      }
+    }
 
     if (Object.keys(update.defer).length !== 0) {
       setTimeout(
@@ -365,103 +510,105 @@ const Wire = opt => {
       return
     }
 
-    store.get(
-      lex,
-      (err, ack) => {
-        if (ack) {
-          // Populate in-memory graph from store data before sending the server
-          // request, so stale server responses with older state are correctly
-          // rejected by ham.mix.
-          for (const [soul, node] of Object.entries(ack)) {
-            if (!node) continue
-            if (!graph[soul]) {
-              graph[soul] = {...node}
-              continue
-            }
-            // Merge properties absent from the current graph entry. Only add
-            // missing keys — existing entries were set by ham.mix and represent
-            // the authoritative merged state for those properties.
-            for (const [key, value] of Object.entries(node)) {
-              if (key === "_") continue
-              if (typeof graph[soul][key] !== "undefined") continue
-              graph[soul][key] = value
-              if (node._ && node._[">"] && typeof node._[">"][key] !== "undefined") {
-                const state = node._[">"][key]
-                graph[soul]._[">"][key] = state
-                if (node._["s"] && node._["s"][state]) {
-                  if (!graph[soul]._["s"]) graph[soul]._["s"] = {}
-                  graph[soul]._["s"][state] = node._["s"][state]
-                }
+    store.get(lex, (err, ack) => {
+      if (ack) {
+        // Populate in-memory graph from store data before sending the server
+        // request, so stale server responses with older state are correctly
+        // rejected by ham.mix.
+        for (const [soul, node] of Object.entries(ack)) {
+          if (!node) continue
+          if (!graph[soul]) {
+            graph[soul] = {...node}
+            continue
+          }
+          // Merge properties absent from the current graph entry. Only add
+          // missing keys — existing entries were set by ham.mix and represent
+          // the authoritative merged state for those properties.
+          for (const [key, value] of Object.entries(node)) {
+            if (key === "_") continue
+            if (typeof graph[soul][key] !== "undefined") continue
+            graph[soul][key] = value
+            if (
+              node._ &&
+              node._[">"] &&
+              typeof node._[">"][key] !== "undefined"
+            ) {
+              const state = node._[">"][key]
+              graph[soul]._[">"][key] = state
+              if (node._["s"] && node._["s"][state]) {
+                if (!graph[soul]._["s"]) graph[soul]._["s"] = {}
+                graph[soul]._["s"][state] = node._["s"][state]
               }
             }
           }
-          // Full-node fetch: the graph is now complete for this soul.
-          if (!lex["."] && ack[lex["#"]]) hasNode.add(lex["#"])
-          // Only serve from store if the requested property is present.
-          const node = ack[lex["#"]]
-          const hasProperty =
-            node &&
-            Object.keys(node).some(
-              key => key !== "_" && utils.match(lex["."], key),
-            )
-          if (hasProperty) {
-            // Public keys are immutable once written — never need a wire check.
-            if (!isNode && lex["."] !== utils.userPublicKey) {
-              if (!lex["."] || typeof lex["."] === "string") {
-                const checkKey = lex["#"] + (lex["."] ? "." + lex["."] : "")
-                const now = Date.now()
-                const lastCheck = recentChecks.get(checkKey)
-                if (!lastCheck || now - lastCheck > recentCheckTTL) {
-                  recentChecks.set(checkKey, now)
-                  const sendResult = send(request)
-                  if (sendResult && sendResult.err) {
-                    cb({err: sendResult.err})
-                    return
-                  }
-                }
-              } else {
+        }
+        // Full-node fetch: the graph is now complete for this soul.
+        if (!lex["."] && ack[lex["#"]]) hasNode.add(lex["#"])
+        // Only serve from store if the requested property is present.
+        const node = ack[lex["#"]]
+        const hasProperty =
+          node &&
+          Object.keys(node).some(
+            key => key !== "_" && utils.match(lex["."], key),
+          )
+        if (hasProperty) {
+          // Public keys are immutable once written — never need a wire check.
+          if (!isNode && lex["."] !== utils.userPublicKey) {
+            if (!lex["."] || typeof lex["."] === "string") {
+              const checkKey = lex["#"] + (lex["."] ? "." + lex["."] : "")
+              const now = Date.now()
+              const lastCheck = recentChecks.get(checkKey)
+              if (!lastCheck || now - lastCheck > recentCheckTTL) {
+                recentChecks.set(checkKey, now)
                 const sendResult = send(request)
                 if (sendResult && sendResult.err) {
                   cb({err: sendResult.err})
                   return
                 }
               }
+            } else {
+              const sendResult = send(request)
+              if (sendResult && sendResult.err) {
+                cb({err: sendResult.err})
+                return
+              }
             }
-            cb(err ? {put: ack, err: err} : {put: ack})
-            return
           }
-        }
-
-        // Data wasn't found locally, log errors and call back after a timeout.
-        if (err) console.log(err)
-
-        // Put requests only need a local answer — skip the wire round-trip.
-        if (_opt && _opt.put) {
-          const id = lex["#"]
-          const ack = {[id]: null}
-          if (typeof lex["."] === "string") {
-            ack[id] = {[lex["."]]: null}
-          }
-          cb({put: ack})
+          cb(err ? {put: ack, err: err} : {put: ack})
           return
         }
+      }
 
-        queue[track] = cb
+      // Data wasn't found locally, log errors and call back after a timeout.
+      if (err) console.log(err)
 
-        // Store lex to construct the null ack when the timeout fires
-        pendingTimeouts.set(track, lex)
-
-        // Ensure the requested soul is stored when the response arrives.
-        pendingReferences.add(lex["#"])
-
-        const sendResult = send(request)
-        if (sendResult && sendResult.err) {
-          cb({err: sendResult.err})
-          delete queue[track]
-          pendingTimeouts.delete(track)
-          return
+      // Put requests only need a local answer — skip the wire round-trip.
+      if (_opt && _opt.put) {
+        const id = lex["#"]
+        const ack = {[id]: null}
+        if (typeof lex["."] === "string") {
+          ack[id] = {[lex["."]]: null}
         }
-      })
+        cb({put: ack})
+        return
+      }
+
+      queue[track] = cb
+
+      // Store lex to construct the null ack when the timeout fires
+      pendingTimeouts.set(track, lex)
+
+      // Ensure the requested soul is stored when the response arrives.
+      pendingReferences.add(lex["#"])
+
+      const sendResult = send(request)
+      if (sendResult && sendResult.err) {
+        cb({err: sendResult.err})
+        delete queue[track]
+        pendingTimeouts.delete(track)
+        return
+      }
+    })
   }
 
   const api = send => {
@@ -481,7 +628,22 @@ const Wire = opt => {
         // here using the api. This is ok because correct timestamps should be
         // used whereas wire spec needs to handle clock skew for updates
         // across the network.
-        const update = await Ham.mix(data, graph, hasNode, opt.secure, listen)
+        const oldGraphBytes = {}
+        if (opt.userLimit) {
+          for (const [soul, node] of Object.entries(data)) {
+            if (node && node[utils.userPublicKey] && graph[soul]) {
+              oldGraphBytes[soul] = JSON.stringify(graph[soul]).length
+            }
+          }
+        }
+        const update = await Ham.mix(
+          data,
+          graph,
+          hasNode,
+          opt.secure,
+          listen,
+          opt.maxGraphSize,
+        )
         if (Object.keys(update.now).length === 0) {
           // No updates, still respond to callback.
           if (cb) cb(null)
@@ -490,6 +652,24 @@ const Wire = opt => {
 
         if (!(await check(update.now, send, cb))) {
           return
+        }
+
+        if (opt.userLimit) {
+          for (const [soul, node] of Object.entries(update.now)) {
+            const pub = node[utils.userPublicKey]
+            if (!pub) continue
+            const limit = userLimits.get(pub) ?? defaultLimit
+            const current = userStorage.get(pub) ?? 0
+            if (current >= limit) {
+              if (cb) cb("storage limit exceeded")
+              return
+            }
+
+            const oldBytes = oldGraphBytes[soul] ?? 0
+            const newBytes = JSON.stringify(node).length
+            userStorage.set(pub, Math.max(0, current - oldBytes + newBytes))
+            saveUserStorage()
+          }
         }
 
         // Seed pendingReferences with any new references from API calls
@@ -561,9 +741,7 @@ const Wire = opt => {
     // mock-sockets provides clients as a function that returns an array.
     let clients = () => wss.clients()
     if (!wss) {
-      const config = opt.server
-        ? {server: opt.server}
-        : {port: opt.port}
+      const config = opt.server ? {server: opt.server} : {port: opt.port}
       wss = new wsModule.WebSocketServer(config)
       clients = () => wss.clients
     }
@@ -576,18 +754,21 @@ const Wire = opt => {
         const lex = pendingTimeouts.get(trackId)
         pendingTimeouts.delete(trackId)
 
-        setTimeout(() => {
-          const cb = queue[trackId]
-          if (cb) {
-            const id = lex["#"]
-            const ack = {[id]: null}
-            if (typeof lex["."] === "string") {
-              ack[id] = {[lex["."]]: null}
+        setTimeout(
+          () => {
+            const cb = queue[trackId]
+            if (cb) {
+              const id = lex["#"]
+              const ack = {[id]: null}
+              if (typeof lex["."] === "string") {
+                ack[id] = {[lex["."]]: null}
+              }
+              cb({put: ack})
+              delete queue[trackId]
             }
-            cb({put: ack})
-            delete queue[trackId]
-          }
-        }, isTestEnv ? 100 : 10000)
+          },
+          isTestEnv ? 100 : 10000,
+        )
       }
 
       clients().forEach(client => {
@@ -611,6 +792,11 @@ const Wire = opt => {
         }
       })
     }
+    if (opt.userLimit) {
+      loadUserStorage(() => loadUserLimits(() => logStorageSummary()))
+      setInterval(loadUserLimits, 60000).unref()
+    }
+
     wss.on("connection", ws => {
       // Check connection limit
       if (!connectionManager.add(ws)) {
@@ -722,7 +908,11 @@ const Wire = opt => {
   let queueProcessor = null
   const maxQueueLength = opt.maxQueueLength || 10000
 
-  const startResponseTimeout = (trackId, lex, delay = isTestEnv ? 100 : 10000) => {
+  const startResponseTimeout = (
+    trackId,
+    lex,
+    delay = isTestEnv ? 100 : 10000,
+  ) => {
     return setTimeout(() => {
       offlineTimeouts.delete(trackId)
       pendingTimeouts.delete(trackId)
@@ -772,7 +962,8 @@ const Wire = opt => {
 
     // Drop GET messages with no pending callback — these were already served
     // from local store so no caller is waiting for the wire response.
-    const isStaleCheckMessage = !sent && msg.get && !pendingTimeouts.has(trackId)
+    const isStaleCheckMessage =
+      !sent && msg.get && !pendingTimeouts.has(trackId)
 
     if (sent || isStaleCheckMessage) {
       messageQueue.shift()
@@ -908,7 +1099,12 @@ const Wire = opt => {
           for (const [soul, node] of Object.entries(msg.put)) {
             const known = await hasSoul(soul)
             hasSoulMap.set(soul, known)
-            if ((!known && !pendingReferences.has(soul)) || !node || typeof node !== "object") continue
+            if (
+              (!known && !pendingReferences.has(soul)) ||
+              !node ||
+              typeof node !== "object"
+            )
+              continue
             for (const [, value] of Object.entries(node)) {
               const soulId = utils.rel.is(value)
               if (soulId) pendingReferences.add(soulId)
