@@ -292,9 +292,7 @@ const Wire = opt => {
   const logStorageSummary = () => {
     const userCount = userStorage.size
     const defLimitStr =
-      defaultLimit === 0
-        ? "0 B (unlisted users blocked)"
-        : formatBytes(defaultLimit)
+      defaultLimit === 0 ? "unlisted users blocked" : formatBytes(defaultLimit)
     console.log(
       `[HOLSTER] Per-user storage limits enabled (${userCount} user${userCount !== 1 ? "s" : ""}, default: ${defLimitStr})`,
     )
@@ -302,7 +300,7 @@ const Wire = opt => {
     const formatUser = pub => {
       const total = userStorage.get(pub) ?? 0
       const limit = userLimits.get(pub) ?? defaultLimit
-      const limitStr = limit === 0 ? "0 B (blocked)" : formatBytes(limit)
+      const limitStr = limit === 0 ? "blocked" : formatBytes(limit)
       return `  ${pub} — used: ${formatBytes(total)} / limit: ${limitStr}`
     }
     if (userCount <= 5) {

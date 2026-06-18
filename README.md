@@ -1,7 +1,6 @@
-Holster is a real-time data synchronisation service that seamlessly connects
-devices using Node.js, Deno, Bun or the browser. Built with ES modules, it
-features end-to-end encryption, conflict resolution and cross-platform
-compatibility.
+Holster is a real-time data synchronisation service that connects devices using
+Node.js, Deno, Bun or the browser. Built with ES modules, it features
+end-to-end encryption, conflict resolution and cross-platform compatibility.
 
 ✨ Real-time sync across all connected devices\
 🔐 Built-in encryption with user authentication\
