@@ -62,6 +62,12 @@ For production you can start with pm2:
 
 To allow connections via a web server see [examples/apache.md](examples/apache.md).
 
+### Related packages
+
+[holster-router](https://github.com/mblaney/holster-router) provides an Express
+router for building web applications with Holster, including user account
+management and email integration.
+
 ### Development
 
 #### JavaScript
