@@ -493,7 +493,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         if ((userStorage.get(pub) ?? 0) >= limit) continue
         toStore[soul] = node
         const oldBytes = oldGraphBytes[soul] ?? 0
-        const newBytes = JSON.stringify(node).length
+        const newBytes = graph[soul] ? JSON.stringify(graph[soul]).length : 0
         userStorage.set(
           pub,
           Math.max(0, (userStorage.get(pub) ?? 0) - oldBytes + newBytes),
@@ -705,7 +705,9 @@ const Wire = (opt: HolsterOptions): WireAPI => {
               return
             }
             const oldBytes = oldGraphBytes[soul] ?? 0
-            const newBytes = JSON.stringify(node).length
+            const newBytes = graph[soul]
+              ? JSON.stringify(graph[soul]).length
+              : 0
             userStorage.set(pub, Math.max(0, current - oldBytes + newBytes))
             saveUserStorage()
           }
