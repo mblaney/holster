@@ -33,7 +33,7 @@ to get started using the API, and for more information.
 
 - Open `http://localhost:3000/examples/index.html` in the browser.
 - You will then also have access to the Holster API via the `holster` object in
-the console
+  the console
 
 ### How to run a Holster relay
 
@@ -49,16 +49,16 @@ memory and storage options with larger values than the defaults, which are
 conservative to support browser use. See [Holster options](https://github.com/mblaney/holster/wiki/Holster-API#holster-options) for more details. To run this
 with node:
 
- - `npm install`
- - `node relay.js`
+- `npm install`
+- `node relay.js`
 
 For production you can start with pm2:
 
- - `npm install pm2 -g`
- - `export NODE_ENV=production`
- - `pm2 startup` (And follow startup instructions.)
- - `pm2 start relay.js`
- - `pm2 save`
+- `npm install pm2 -g`
+- `export NODE_ENV=production`
+- `pm2 startup` (And follow startup instructions.)
+- `pm2 start relay.js`
+- `pm2 save`
 
 To allow connections via a web server see [examples/apache.md](examples/apache.md).
 
@@ -70,11 +70,6 @@ management and email integration.
 
 ### Development
 
-#### JavaScript
-- When modifying src files run: `npx prettier src --write`
-- When modifying tests run: `npx prettier test --write`
+- When modifying files run: `npx prettier . --write`
 - To run the JavaScript tests use: `npm run test`
-
-#### TypeScript
-- When modifying TypeScript files run: `npx prettier ts --write`
 - To run the TypeScript tests use: `npm run test:ts`

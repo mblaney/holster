@@ -353,19 +353,23 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       `[HOLSTER] Per-user storage limits enabled (${userCount} user${userCount !== 1 ? "s" : ""}, default: ${defLimitStr})`,
     )
     const sorted = [...userStorage.entries()].sort(([, a], [, b]) => b - a)
-    const formatUser = (pub: string): string => {
+    const logUser = (pub: string): void => {
       const total = userStorage.get(pub) ?? 0
       const limit = userLimits.get(pub) ?? defaultLimit
       const limitStr = limit === 0 ? "blocked" : formatBytes(limit)
-      return `  ${pub} — used: ${formatBytes(total)} / limit: ${limitStr}`
+      console.log(
+        `  ${pub.slice(0, 16)}... used: ${formatBytes(total)} / limit: ${limitStr}`,
+      )
     }
     if (userCount <= 5) {
-      sorted.forEach(([pub]) => console.log(formatUser(pub)))
+      sorted.forEach(([pub]) => logUser(pub))
     } else {
       console.log("  Top 5 by storage used:")
-      sorted.slice(0, 5).forEach(([pub]) => console.log(formatUser(pub)))
-      console.log(`  Run \`node examples/user-storage.js\` to view all users`)
+      sorted.slice(0, 5).forEach(([pub]) => logUser(pub))
     }
+    console.log(
+      "  Run `npx holster-user-storage` to view full keys and all users",
+    )
   }
 
   const check = async (
