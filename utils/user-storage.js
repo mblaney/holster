@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Displays per-user storage stats for a Holster relay with userLimit enabled.
-// Usage: node examples/user-storage.js [dir] [--limit N] [--offset N]
+// Usage: node utils/user-storage.js [dir] [--limit N] [--offset N]
 
 import {readFileSync, existsSync} from "node:fs"
+import {resolve} from "node:path"
 
 const args = process.argv.slice(2)
-const dir = args.find(a => !a.startsWith("--")) || "."
+const dir = resolve(args.find(a => !a.startsWith("--")) || ".")
 
 if (!existsSync(dir)) {
   console.error(`Error: directory not found: ${dir}`)
@@ -43,7 +44,7 @@ const DEFAULT_STORAGE_LIMIT = 1 // MB
 const userStorage = readJSON(".user_storage.json")
 const userLimit = readJSON(".user_limit.json")
 
-console.log(`Per-user storage report for ./${dir}:`)
+console.log(`Per-user storage report for ${dir}:`)
 
 if (userStorage.missing) {
   console.log("  No user storage recorded yet.")
@@ -59,21 +60,27 @@ if (userLimit.missing) {
   process.exit(1)
 }
 
-const users = Object.entries(userStorage.data || {}).map(([pub, total]) => {
-  return {pub, total}
-}).sort((a, b) => b.total - a.total)
+const users = Object.entries(userStorage.data || {})
+  .map(([pub, total]) => {
+    return {pub, total}
+  })
+  .sort((a, b) => b.total - a.total)
 
 const page = users.slice(offset, offset + limit)
 
 console.log(`  Total users: ${users.length}`)
 if (page.length > 0) {
-  console.log(`  Showing ${page.length} user${page.length !== 1 ? "s" : ""} (offset: ${offset}, limit: ${limit})`)
+  console.log(
+    `  Showing full public keys for ${page.length} user${page.length !== 1 ? "s" : ""} (offset: ${offset}, limit: ${limit})`,
+  )
 }
 
 const data = userLimit.data || {}
 for (const {pub, total} of page) {
-  const pubLimit = typeof data[pub] === "number" ? data[pub] : DEFAULT_STORAGE_LIMIT
-  const limitStr = pubLimit === 0 ? "0 B (blocked)" : formatBytes(pubLimit * 1048576)
+  const pubLimit =
+    typeof data[pub] === "number" ? data[pub] : DEFAULT_STORAGE_LIMIT
+  const limitStr =
+    pubLimit === 0 ? "0 B (blocked)" : formatBytes(pubLimit * 1048576)
   console.log(`  ${pub}`)
   console.log(`    used: ${formatBytes(total)} / limit: ${limitStr}`)
 }

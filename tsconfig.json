@@ -12,7 +12,7 @@
     "rootDir": "./ts",
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    
+
     /* Strict Type Checking */
     "strict": true,
     "noImplicitAny": true,
@@ -22,7 +22,7 @@
     "strictPropertyInitialization": true,
     "noImplicitThis": true,
     "alwaysStrict": true,
-    
+
     /* Additional Checks */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -31,7 +31,7 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": false,
-    
+
     /* Module Resolution */
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -42,4 +42,3 @@
   "include": ["ts/src/**/*"],
   "exclude": ["node_modules", "dist", "build", "test", "examples", "ts/test"]
 }
-
