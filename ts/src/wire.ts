@@ -367,9 +367,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       console.log("  Top 5 by storage used:")
       sorted.slice(0, 5).forEach(([pub]) => logUser(pub))
     }
-    console.log(
-      "  Run `npx holster-user-storage` to view full keys and all users",
-    )
+    console.log("Run npx holster-user-storage to view full keys and all users")
   }
 
   const check = async (
