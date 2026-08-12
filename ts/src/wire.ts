@@ -370,6 +370,14 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     console.log("Run npx holster-user-storage to view full keys and all users")
   }
 
+  // The check function is required because user data must provide a public key
+  // so that it can be verified. The public key might verify the provided
+  // signature but not actually match the user under which the data is being
+  // stored. To avoid this, the current data on a soul needs to be checked to
+  // make sure the stored public key matches the one provided with the update.
+  // This must run before Ham.mix, which updates graph in place — checking
+  // afterwards would compare the incoming update's public key against itself
+  // instead of the previously stored one.
   const check = async (
     data: Graph,
     send: (msg: string) => {err?: string} | void,
@@ -383,8 +391,12 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       // allow it - the update is not trying to change the public key.
       if (node[key] === undefined) continue
 
+      // A full-node lookup is required (rather than a targeted property
+      // lookup) so that a soul which exists but has never had a public key
+      // can be told apart from a soul that doesn't exist yet — both would
+      // otherwise resolve to the same "not found" shape for this one key.
       const msg = await new Promise<WireMessage>(res => {
-        getWithCallback({"#": soul, ".": key}, res, send, {put: true})
+        getWithCallback({"#": soul}, res, send, {put: true})
       })
       if (msg.err) {
         if (cb) cb(msg.err)
@@ -395,7 +407,12 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       // matching public keys, as the provided soul also needs a rel on the
       // parent node which then also requires checking. Otherwise public keys
       // need to match for existing data.
-      if (!msg.put || !msg.put[soul] || msg.put[soul]![key] === node[key]) {
+      const existing = msg.put && msg.put[soul]
+      if (
+        !existing ||
+        existing[key] === undefined ||
+        existing[key] === node[key]
+      ) {
         continue
       }
 
@@ -449,6 +466,8 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       }
     }
 
+    if (!(await check(msg.put, send as never))) return
+
     const update = await Ham.mix(
       msg.put,
       graph,
@@ -466,8 +485,6 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       }
       return
     }
-
-    if (!(await check(update.now, send as never))) return
 
     const finish = (err?: string | null): void => {
       if (err) console.warn("store.put", err)
@@ -679,6 +696,10 @@ const Wire = (opt: HolsterOptions): WireAPI => {
             }
           }
         }
+        if (!(await check(data, send as never, cb))) {
+          return
+        }
+
         const update = await Ham.mix(
           data,
           graph,
@@ -689,10 +710,6 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         )
         if (Object.keys(update.now).length === 0) {
           if (cb) cb(null)
-          return
-        }
-
-        if (!(await check(update.now, send as never, cb))) {
           return
         }
 

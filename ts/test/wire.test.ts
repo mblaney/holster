@@ -3,6 +3,8 @@ import {Server} from "mock-socket"
 import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Wire from "../src/wire.ts"
+import SEA from "../src/sea.ts"
+import * as utils from "../src/utils.ts"
 import type {WireInterface} from "../src/schemas.ts"
 
 describe("wire", () => {
@@ -254,6 +256,49 @@ describe("wire", () => {
         })
       },
     )
+  })
+
+  test("put with a different key is rejected once a soul has an owner", async () => {
+    const soul = "owned_test_soul"
+    const pairA = await SEA.pair()
+    const pairB = await SEA.pair()
+
+    const graphFor = async (
+      pair: {pub: string; priv: string},
+      value: string,
+    ) => {
+      const timestamp = Date.now()
+      const sig = await SEA.signTimestamp(timestamp, pair as never)
+      return utils.graph(soul, {value}, sig as never, pair.pub, timestamp)
+    }
+
+    const first = await graphFor(pairA, "from A")
+    await new Promise<void>((resolve, reject) => {
+      secureWire.put(first, err => (err ? reject(err) : resolve()))
+    })
+
+    // Confirm the soul already has an established owner before attempting
+    // the conflicting write, otherwise this isn't testing what it claims to.
+    const owned = await new Promise<any>(resolve => {
+      secureWire.get({"#": soul}, msg => resolve(msg.put?.[soul]))
+    })
+    assert.equal(owned?.value, "from A")
+    assert.equal(owned?._holster_user_public_key, pairA.pub)
+
+    const second = await graphFor(pairB, "from B")
+    const err = await new Promise<string | null | undefined>(resolve => {
+      secureWire.put(second, resolve as never)
+    })
+    assert.equal(
+      err,
+      `error in wire check public key does not match for soul: ${soul}`,
+    )
+
+    const stored = await new Promise<any>(resolve => {
+      secureWire.get({"#": soul}, msg => resolve(msg.put?.[soul]))
+    })
+    assert.equal(stored.value, "from A")
+    assert.equal(stored._holster_user_public_key, pairA.pub)
   })
 
   test("offline PUT does not block subsequent GET", (t, done) => {

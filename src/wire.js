@@ -319,6 +319,9 @@ const Wire = opt => {
   // signature but not actually match the user under which the data is being
   // stored. To avoid this, the current data on a soul needs to be checked to
   // make sure the stored public key matches the one provided with the update.
+  // This must run before Ham.mix, which updates graph in place — checking
+  // afterwards would compare the incoming update's public key against itself
+  // instead of the previously stored one.
   const check = async (data, send, cb) => {
     const key = utils.userPublicKey
 
@@ -328,8 +331,12 @@ const Wire = opt => {
       // allow it - the update is not trying to change the public key.
       if (node[key] === undefined) continue
 
+      // A full-node lookup is required (rather than a targeted property
+      // lookup) so that a soul which exists but has never had a public key
+      // can be told apart from a soul that doesn't exist yet — both would
+      // otherwise resolve to the same "not found" shape for this one key.
       const msg = await new Promise(res => {
-        getWithCallback({"#": soul, ".": key}, res, send, {put: true})
+        getWithCallback({"#": soul}, res, send, {put: true})
       })
       if (msg.err) {
         if (cb) cb(msg.err)
@@ -340,7 +347,12 @@ const Wire = opt => {
       // matching public keys, as the provided soul also needs a rel on the
       // parent node which then also requires checking. Otherwise public keys
       // need to match for existing data.
-      if (!msg.put || !msg.put[soul] || msg.put[soul][key] === node[key]) {
+      const existing = msg.put && msg.put[soul]
+      if (
+        !existing ||
+        existing[key] === undefined ||
+        existing[key] === node[key]
+      ) {
         continue
       }
 
@@ -394,6 +406,8 @@ const Wire = opt => {
       }
     }
 
+    if (!(await check(msg.put, send))) return
+
     // Store updates returned from Ham.mix and defer updates if required.
     const update = await Ham.mix(
       msg.put,
@@ -413,8 +427,6 @@ const Wire = opt => {
       }
       return
     }
-
-    if (!(await check(update.now, send))) return
 
     const finish = err => {
       if (err) console.warn("store.put", err)
@@ -636,6 +648,10 @@ const Wire = opt => {
             }
           }
         }
+        if (!(await check(data, send, cb))) {
+          return
+        }
+
         const update = await Ham.mix(
           data,
           graph,
@@ -647,10 +663,6 @@ const Wire = opt => {
         if (Object.keys(update.now).length === 0) {
           // No updates, still respond to callback.
           if (cb) cb(null)
-          return
-        }
-
-        if (!(await check(update.now, send, cb))) {
           return
         }
 
