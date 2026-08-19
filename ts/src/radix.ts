@@ -57,44 +57,74 @@ const Radix = (): RadixFunction => {
     }
 
     if (!found) {
-      // If not found from the provided keys try matching with an existing key
-      const result = utils.obj.map(
-        tree!,
-        (hasValue: RadixValue, hasKey: string) => {
-          let j = 0
-          let matchingKey = ""
-          while (hasKey[j] === keys[j]) {
-            matchingKey += hasKey[j]
-            j++
-          }
-          if (matchingKey) {
-            if (noValue) {
-              // matchingKey has to be as long as the original keys when reading
+      if (noValue) {
+        // If not found from the provided keys try matching with an
+        // existing key.
+        const result = utils.obj.map(
+          tree!,
+          (hasValue: RadixValue, hasKey: string) => {
+            let j = 0
+            let matchingKey = ""
+            while (hasKey[j] === keys[j]) {
+              matchingKey += hasKey[j]
+              j++
+            }
+            if (matchingKey) {
+              // matchingKey has to be as long as the original keys when
+              // reading.
               if (j <= max) return undefined
 
               tmp[hasKey.slice(j)] = hasValue
               return hasValue
             }
+            return undefined
+          },
+        )
+        if (!result) return undefined
 
-            const replace: RadixTree = {
-              [hasKey.slice(j)]: hasValue,
-              [keys.slice(j)]: {[record]: value!},
-            }
-            tree![matchingKey] = {[group]: replace}
-            delete tree![hasKey]
-            return true
-          }
-          return undefined
-        },
-      )
+        return tmp
+      }
 
-      if (!result) {
-        if (noValue) return undefined
+      // Writing: find the EXISTING key with the longest shared prefix,
+      // not just the first one with any overlap at all (obj.map stops at
+      // the first non-undefined result, so a plain find here would settle
+      // for whichever candidate happens to come first in Object.keys'
+      // own iteration order). A radix tree's own invariant - no two
+      // sibling keys share a prefix - only holds if every insertion
+      // merges with its one true match; with many keys sharing this tree
+      // at once (many concurrent writers batched together), a
+      // coincidentally shorter, unrelated key can otherwise "win" over
+      // the real, much longer match - silently misplacing the new key
+      // under the wrong group, while its actual sibling is never touched
+      // at all and stays wherever it already was, invisible to any read
+      // that expects it inside this new group.
+      let bestKey: string | null = null
+      let bestMatch = ""
+      for (const hasKey of Object.keys(tree!)) {
+        let j = 0
+        let matchingKey = ""
+        while (hasKey[j] === keys[j]) {
+          matchingKey += hasKey[j]
+          j++
+        }
+        if (matchingKey.length > bestMatch.length) {
+          bestKey = hasKey
+          bestMatch = matchingKey
+        }
+      }
 
+      if (bestKey) {
+        const hasValue = tree![bestKey]!
+        const j = bestMatch.length
+        const replace: RadixTree = {
+          [bestKey.slice(j)]: hasValue,
+          [keys.slice(j)]: {[record]: value!},
+        }
+        tree![bestMatch] = {[group]: replace}
+        delete tree![bestKey]
+      } else {
         if (!tree![key]) tree![key] = {}
         tree![key]![record] = value!
-      } else if (noValue) {
-        return tmp
       }
     } else if (i === max) {
       // If no value use the key provided to return a whole group or record

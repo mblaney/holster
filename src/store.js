@@ -297,4 +297,5 @@ const Store = opt => {
   }
 }
 
+export {fileSystem}
 export default Store

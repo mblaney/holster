@@ -336,4 +336,5 @@ const Store = (opt?: StoreOptions): StoreInterface => {
   }
 }
 
+export {fileSystem}
 export default Store
