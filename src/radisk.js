@@ -171,13 +171,7 @@ const Radisk = opt => {
     radisk.batch = Radix()
     radisk.batch.acks = []
     radisk.batch.ed = 0
-    let i = 0
     radisk.save(batch, err => {
-      // This is to ignore multiple callbacks from radisk.save calling
-      // radisk.write? It looks like multiple callbacks will be made if a
-      // file needs to be split.
-      if (++i > 1) return
-
       if (err) opt.log(err)
       batch.acks.forEach(cb => cb(err))
       radisk.thrash.at = null
@@ -199,23 +193,47 @@ const Radisk = opt => {
         if (key < save.start) return
 
         save.start = key
-        opt.store.list(save.lex)
+        // store.list's own streamed order isn't guaranteed to be sorted -
+        // fs.readdir in particular makes no such promise, unlike
+        // radisk.read's own file lookup, which already sorts before
+        // searching. Collect the full list and sort it first, rather
+        // than scanning the raw stream as it arrives, since save.lex's
+        // own boundary search below only works correctly over genuinely
+        // sorted input - fed an unsorted stream, it can match the wrong
+        // file, or stop tracking new candidates the moment the stream
+        // stops looking monotonic, silently losing track of files that
+        // arrive afterward.
+        const files = []
+        opt.store.list(file => {
+          if (file) {
+            files.push(file)
+            return
+          }
+          files.sort()
+          save.lex(files)
+        })
         return true
       },
-      lex: file => {
-        if (!file || file > save.start) {
-          save.end = file
-          // ! is used as the first file name as it's the first printable
-          // character, so always matches as lexically less than any node.
-          // Also save.start can be set to undefined by a previous call to
-          // save.mix, so don't continue in this case.
-          if (save.start) save.mix(save.file || "!", save.start, save.end)
-        } else {
-          save.file = file
+      lex: files => {
+        // save.start can be set to undefined by a previous call to
+        // save.mix, so don't continue in this case.
+        if (!save.start) return
+
+        let candidate = null
+        for (const file of files) {
+          if (file > save.start) {
+            // ! is used as the first file name as it's the first
+            // printable character, so always matches as lexically less
+            // than any node.
+            save.mix(candidate || "!", save.start, file)
+            return
+          }
+          candidate = file
         }
+        save.mix(candidate || "!", save.start, u)
       },
       mix: (file, start, end) => {
-        save.start = save.end = save.file = u
+        save.start = u
         // Use cache if available, otherwise parse from disk
         if (cache.has(file)) {
           const disk = cache.get(file)
@@ -223,8 +241,17 @@ const Radisk = opt => {
             if (key < start) return
 
             if (end && end < key) {
+              // Found where the next file segment starts - stop here (the
+              // non-undefined return is what actually stops Radix.map's
+              // own iteration). Without it, the scan kept going through
+              // every remaining entry in the whole batch, each one
+              // overwriting save.start in turn, so save.next's own resume
+              // point ended up as the LAST key in the batch rather than
+              // the very next one - silently skipping every entry in
+              // between as "already processed" when none of them ever
+              // were.
               save.start = key
-              return
+              return true
             }
 
             disk(key, value)
@@ -239,11 +266,21 @@ const Radisk = opt => {
 
               if (end && end < key) {
                 save.start = key
-                return
+                return true
               }
 
               disk(key, value)
             })
+            // Populate the cache with this merge synchronously, before the
+            // async store.put below even starts - a write's own merged
+            // result is always authoritative (it's this batch's actual
+            // content), unlike a plain read's parse, which can't tell
+            // whether it raced ahead of a write. Closes the window where a
+            // concurrent read's own parse-from-disk (started before this
+            // write, resolving after it) would otherwise be free to
+            // populate the cache with stale, pre-write data - see
+            // radisk.read's own matching change below.
+            if (opt.cache) cache.set(file, disk)
             radisk.write(file, disk, save.next)
           })
         }
@@ -260,6 +297,21 @@ const Radisk = opt => {
   }
 
   radisk.write = (file, rad, cb) => {
+    // A split produces two independent opt.store.put calls - this file's
+    // own (truncated) remainder below, and the recursive call for the
+    // split-off sub-file. pending starts at 1 for this file's own write,
+    // and is bumped to 2 the moment a split is decided, so cb only fires
+    // once both halves are actually durable - calling it as soon as
+    // whichever one finishes first (the previous behavior) let a caller
+    // continue - including resolving the original put()'s own callback -
+    // before the other half's data had actually been written.
+    let pending = 1
+    let firstErr = null
+    const settle = err => {
+      if (err && !firstErr) firstErr = err
+      if (--pending > 0) return
+      cb(firstErr)
+    }
     const write = {
       text: "",
       limit: "",
@@ -318,7 +370,8 @@ const Radisk = opt => {
             write.done = true
             write.sub = Radix()
             Radix.map(rad, write.slice)
-            radisk.write(write.limit, write.sub, cb)
+            pending++
+            radisk.write(write.limit, write.sub, settle)
             return
           }
         }
@@ -342,7 +395,7 @@ const Radisk = opt => {
         cache.delete(file)
         fileListCache = null
       }
-      cb(err)
+      settle(err)
     })
   }
 
@@ -378,7 +431,13 @@ const Radisk = opt => {
       }
       radisk.parse(file, (err, disk) => {
         if (err) opt.log(err)
-        if (disk && opt.cache) {
+        // Never overwrite an existing cache entry from a plain read - it
+        // can't tell whether it raced ahead of a concurrent write (started
+        // before that write, but resolving after the write already
+        // installed its own authoritative, freshly-merged entry - see
+        // save.mix's own matching change). Only populate the cache when
+        // nothing beat this read to it.
+        if (disk && opt.cache && !cache.has(file)) {
           cache.set(file, disk)
           checkMemoryUsage()
         }

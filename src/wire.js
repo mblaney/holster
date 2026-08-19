@@ -666,6 +666,17 @@ const Wire = opt => {
           return
         }
 
+        // Ham.mix has already merged this locally-authored update into
+        // graph[soul], synchronously, before store.put below even starts
+        // persisting it - mark it as fully known now rather than waiting
+        // for a future disk fetch to do so, so a read landing in that
+        // window doesn't get forced through a disk round-trip that could
+        // itself race ahead of this same write and find nothing, even
+        // though the correct answer was already sitting in memory.
+        for (const soul of Object.keys(update.now)) {
+          hasNode.add(soul)
+        }
+
         if (opt.userLimit) {
           for (const [soul, node] of Object.entries(update.now)) {
             const pub = node[utils.userPublicKey]

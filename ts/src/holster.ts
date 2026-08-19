@@ -78,6 +78,11 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
   const user = User(options, wire as never)
   const map = new Map<(data: unknown) => void, () => void>()
   const allctx = new Map<string, ApiContext>()
+  // Serializes concurrent creation of a missing rel for the same
+  // soul+item, so only the first caller creates it and the rest reuse
+  // its result rather than each minting a competing soul. Map<soul,
+  // Map<item, promise resolving to the soul id>>.
+  const pendingRel = new Map<string, Map<string, Promise<string>>>()
 
   const ok = (data: GraphValue): boolean => {
     return (
@@ -275,6 +280,72 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       }
     }
 
+    // Creates a rel for item on soul, or reuses one already being created
+    // by a concurrent caller for the same soul+item (see pendingRel above).
+    // Calls cb(err, id) with a ready-to-display err, already prefixed where
+    // needed - callers should pass it straight through, not wrap it again.
+    const createRel = (
+      soul: string,
+      item: string,
+      node: Record<string, GraphValue>,
+      user: UserIdentity | null | undefined,
+      cb: (err?: string | null, id?: string) => void,
+    ): void => {
+      let bySoul = pendingRel.get(soul)
+      const pending = bySoul && bySoul.get(item)
+      if (pending) {
+        pending.then(
+          id => cb(undefined, id),
+          err => cb(err as string),
+        )
+        return
+      }
+
+      const id = utils.text.random()
+      node[item] = utils.rel.ify(id)
+      let settle!: (id: string) => void
+      let fail!: (err: unknown) => void
+      const promise = new Promise<string>((res, rej) => {
+        settle = res
+        fail = rej
+      })
+      promise.catch(() => {})
+      if (!bySoul) {
+        bySoul = new Map()
+        pendingRel.set(soul, bySoul)
+      }
+      bySoul.set(item, promise)
+      const clear = () => {
+        bySoul!.delete(item)
+        if (bySoul!.size === 0) pendingRel.delete(soul)
+      }
+
+      void (async () => {
+        // graph() itself calls cb with an already-formatted message when it
+        // fails (secure mode, no user) - pass cb straight through rather
+        // than wrapping, so that message isn't prefixed a second time.
+        const g = await graph(soul, node, user, cb)
+        if (g === null) {
+          clear()
+          fail(new Error("secure mode"))
+          return
+        }
+
+        wire.put(g, err => {
+          clear()
+          if (err) {
+            const message = `error putting ${item} on ${soul}: ${err}`
+            fail(message)
+            cb(message)
+            return
+          }
+
+          settle(id)
+          cb(undefined, id)
+        })
+      })()
+    }
+
     const resolve = (
       request: {
         get?: LexFilter
@@ -341,28 +412,20 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               } else if (get) {
                 cb!(node[item!])
               } else if (put) {
-                id = utils.text.random()
-                node[item!] = utils.rel.ify(id)
-                const g = await graph(
+                createRel(
                   soul!,
+                  item!,
                   node as never,
                   ctx.user,
-                  cb as never,
+                  (err, relId) => {
+                    if (err) {
+                      ;(cb as (err: string) => void)(err)
+                      return
+                    }
+                    ctx.chain[i]!.soul = relId!
+                    api(ctxid).put(request.put!, cb as never)
+                  },
                 )
-                if (g === null) return
-
-                wire.put(g, err => {
-                  if (err) {
-                    ;(cb as (err: string) => void)(
-                      `error putting ${item} on ${soul}: ${err}`,
-                    )
-                    return
-                  }
-                  if (id) {
-                    ctx.chain[i]!.soul = id
-                  }
-                  api(ctxid).put(request.put!, cb as never)
-                })
               } else if (on) {
                 // Item is not a rel yet — watch the parent soul for when it
                 // becomes one, then retry chain resolution.
@@ -372,20 +435,13 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                 if (cb) cb(null)
               }
             } else if (put) {
-              const id = utils.text.random()
               if (!node) node = {} as never
-              node[item!] = utils.rel.ify(id)
-              const g = await graph(soul!, node as never, ctx.user, cb as never)
-              if (g === null) return
-
-              wire.put(g, err => {
+              createRel(soul!, item!, node as never, ctx.user, (err, relId) => {
                 if (err) {
-                  ;(cb as (err: string) => void)(
-                    `error putting ${item} on ${soul}: ${err}`,
-                  )
+                  ;(cb as (err: string) => void)(err)
                   return
                 }
-                ctx.chain[i]!.soul = id
+                ctx.chain[i]!.soul = relId!
                 api(ctxid).put(request.put!, cb as never)
               })
             } else {
@@ -708,28 +764,20 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               const id = utils.rel.is(current as GraphValue)
               if (!id) {
                 if (!node) node = {} as never
-                node[item!] = utils.rel.ify(utils.text.random())
-                const g = await graph(
-                  soul,
-                  node as never,
-                  ctx.user,
-                  _ack as never,
-                )
-                if (g === null) return
-
-                wire.put(g, err => {
+                createRel(soul, item!, node as never, ctx.user, err => {
                   if (err) {
-                    _ack(`error putting ${item} on ${soul}: ${err}`)
-                  } else {
-                    const _ctxid = utils.text.random()
-                    const chain: ChainItem[] = [{item: item!, soul: soul}]
-                    allctx.set(_ctxid, {
-                      chain: chain,
-                      user: ctx.user,
-                      cb: ctx.cb,
-                    })
-                    api(_ctxid).put(data)
+                    _ack(err)
+                    return
                   }
+
+                  const _ctxid = utils.text.random()
+                  const chain: ChainItem[] = [{item: item!, soul: soul}]
+                  allctx.set(_ctxid, {
+                    chain: chain,
+                    user: ctx.user,
+                    cb: ctx.cb,
+                  })
+                  api(_ctxid).put(data)
                 })
                 return
               }

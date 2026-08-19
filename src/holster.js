@@ -14,6 +14,11 @@ const Holster = opt => {
   const map = new Map()
   // Allow concurrent calls to the api by storing each context.
   const allctx = new Map()
+  // Serializes concurrent creation of a missing rel for the same
+  // soul+item, so only the first caller creates it and the rest reuse
+  // its result rather than each minting a competing soul. Map<soul,
+  // Map<item, promise resolving to the soul id>>.
+  const pendingRel = new Map()
 
   const ok = data => {
     return (
@@ -181,6 +186,65 @@ const Holster = opt => {
       }
     }
 
+    // Creates a rel for item on soul, or reuses one already being created
+    // by a concurrent caller for the same soul+item (see pendingRel above).
+    // Calls cb(err, id) with a ready-to-display err, already prefixed where
+    // needed - callers should pass it straight through, not wrap it again.
+    const createRel = (soul, item, node, user, cb) => {
+      let bySoul = pendingRel.get(soul)
+      const pending = bySoul && bySoul.get(item)
+      if (pending) {
+        pending.then(
+          id => cb(null, id),
+          err => cb(err),
+        )
+        return
+      }
+
+      const id = utils.text.random()
+      node[item] = utils.rel.ify(id)
+      let settle, fail
+      const promise = new Promise((res, rej) => {
+        settle = res
+        fail = rej
+      })
+      promise.catch(() => {})
+      if (!bySoul) {
+        bySoul = new Map()
+        pendingRel.set(soul, bySoul)
+      }
+      bySoul.set(item, promise)
+      const clear = () => {
+        bySoul.delete(item)
+        if (bySoul.size === 0) pendingRel.delete(soul)
+      }
+
+      ;(async () => {
+        // graph() itself calls cb with an already-formatted message when it
+        // fails (secure mode, no user) - pass cb straight through rather
+        // than wrapping, so that message isn't prefixed a second time.
+        const g = await graph(soul, node, user, cb)
+        if (g === null) {
+          clear()
+          fail(new Error("secure mode"))
+          return
+        }
+
+        wire.put(g, err => {
+          clear()
+          if (err) {
+            const message = `error putting ${item} on ${soul}: ${err}`
+            fail(message)
+            cb(message)
+            return
+          }
+
+          settle(id)
+          cb(null, id)
+        })
+      })()
+    }
+
     const resolve = (request, cb) => {
       if (!request) {
         console.log("error resolve request parameter required")
@@ -236,18 +300,13 @@ const Holster = opt => {
                 cb(node[item])
               } else if (put) {
                 // Request was chained before put, so rel doesn't exist yet.
-                id = utils.text.random()
-                node[item] = utils.rel.ify(id)
-                const g = await graph(soul, node, ctx.user, cb)
-                if (g === null) return
-
-                wire.put(g, err => {
+                createRel(soul, item, node, ctx.user, (err, relId) => {
                   if (err) {
-                    cb(`error putting ${item} on ${soul}: ${err}`)
+                    cb(err)
                     return
                   }
 
-                  ctx.chain[i].soul = id
+                  ctx.chain[i].soul = relId
                   api(ctxid).put(request.put, cb)
                 })
               } else if (on) {
@@ -261,19 +320,13 @@ const Holster = opt => {
               }
             } else if (put) {
               // Request was chained before put, so rel doesn't exist yet.
-              const id = utils.text.random()
-              if (!node) node = {}
-              node[item] = utils.rel.ify(id)
-              const g = await graph(soul, node, ctx.user, cb)
-              if (g === null) return
-
-              wire.put(g, err => {
+              createRel(soul, item, node || {}, ctx.user, (err, relId) => {
                 if (err) {
-                  cb(`error putting ${item} on ${soul}: ${err}`)
+                  cb(err)
                   return
                 }
 
-                ctx.chain[i].soul = id
+                ctx.chain[i].soul = relId
                 api(ctxid).put(request.put, cb)
               })
             } else {
@@ -541,25 +594,21 @@ const Holster = opt => {
               const id = utils.rel.is(current)
               if (!id) {
                 // The current rel doesn't exist, so add it first.
-                if (!node) node = {}
-                node[item] = utils.rel.ify(utils.text.random())
-                const g = await graph(soul, node, ctx.user, _ack)
-                if (g === null) return
-
-                wire.put(g, err => {
+                createRel(soul, item, node || {}, ctx.user, err => {
                   if (err) {
-                    _ack(`error putting ${item} on ${soul}: ${err}`)
-                  } else {
-                    const _ctxid = utils.text.random()
-                    const chain = [{item: item, soul: soul}]
-                    // Pass on the previous ctx's callback and user flag here.
-                    allctx.set(_ctxid, {
-                      chain: chain,
-                      user: ctx.user,
-                      cb: ctx.cb,
-                    })
-                    api(_ctxid).put(data)
+                    _ack(err)
+                    return
                   }
+
+                  const _ctxid = utils.text.random()
+                  const chain = [{item: item, soul: soul}]
+                  // Pass on the previous ctx's callback and user flag here.
+                  allctx.set(_ctxid, {
+                    chain: chain,
+                    user: ctx.user,
+                    cb: ctx.cb,
+                  })
+                  api(_ctxid).put(data)
                 })
                 return
               }
