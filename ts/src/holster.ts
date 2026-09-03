@@ -7,6 +7,7 @@ import * as utils from "./utils.ts"
 import Wire, {type WireAPI} from "./wire.ts"
 import User, {type UserInterface} from "./user.ts"
 import SEA from "./sea.ts"
+import {attachNested} from "./nested.ts"
 import type {
   HolsterOptions,
   ChainItem,
@@ -55,12 +56,15 @@ export interface HolsterAPI {
     set?: boolean | ((data?: string | null) => void),
     cb?: (data?: string | null) => void,
   ) => HolsterAPI | void
-  on: (
-    lex: LexWithDot | ((data: unknown) => void),
-    cb?: ((data: unknown) => void) | boolean,
-    _get?: boolean,
-    _opt?: WireOptions,
-  ) => void
+  on: {
+    (
+      lex: LexWithDot,
+      cb: (data: unknown) => void,
+      _get?: boolean,
+      _opt?: WireOptions,
+    ): void
+    (cb: (data: unknown) => void, _get?: boolean, _opt?: WireOptions): void
+  }
   off: (cb?: (data: unknown) => void) => HolsterAPI | void
   user: () => UserInterface & HolsterAPI
   wire: WireAPI
@@ -78,6 +82,12 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
   const user = User(options, wire as never)
   const map = new Map<(data: unknown) => void, () => void>()
   const allctx = new Map<string, ApiContext>()
+  // Tracks on(..., {nested: true}) subscriptions, keyed by the caller's
+  // own callback (the same reference off() will be called with) - see
+  // attachNested in nested.ts. The actual top-level/child listeners it
+  // creates use their own, separate contexts, so off() just needs to
+  // call the detach function this stores to tear the whole thing down.
+  const nested = new Map<(data: unknown) => void, () => void>()
   // Serializes concurrent creation of a missing rel for the same
   // soul+item, so only the first caller creates it and the rest reuse
   // its result rather than each minting a competing soul. Map<soul,
@@ -884,6 +894,23 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
 
         const ctx = allctx.get(ctxid)
 
+        if (opts && opts.nested) {
+          // attachNested calls this once for the top level and again for
+          // every discovered child, each needing its own independent
+          // context - a single shared _ctxid would accumulate .next()
+          // calls onto the same path instead of giving sibling paths.
+          const factory = (): HolsterAPI => {
+            const _ctxid = utils.text.random()
+            allctx.set(_ctxid, {
+              chain: [{item: item, soul: soul}],
+              user: ctx ? ctx.user : null,
+            })
+            return api(_ctxid)
+          }
+          nested.set(callback, attachNested(factory, callback, _get, opts))
+          return
+        }
+
         allctx.set(ctxid, {
           chain: [{item: item, soul: soul}],
           on: true,
@@ -1043,12 +1070,18 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               : options.secure,
           },
         )
-      },
+      } as HolsterAPI["on"],
 
       off: function (cb?: (data: unknown) => void): HolsterAPI | void {
         if (!ctxid) {
           console.log("error please provide a key using get(key)")
           if (cb) cb(null)
+          return
+        }
+
+        if (cb && nested.has(cb)) {
+          nested.get(cb)!()
+          nested.delete(cb)
           return
         }
 

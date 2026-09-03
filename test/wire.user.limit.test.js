@@ -19,6 +19,17 @@ describe("wire.user.limit", () => {
   const wss2 = new Server("ws://localhost:1245")
   Wire({file: "test/user-limit-allow", wss: wss2, userLimit: true})
 
+  // A tiny limit makes it easy to push a user over quota with one write,
+  // then check that a later, smaller write (e.g. a delete) still gets
+  // through despite already being over.
+  const wss3 = new Server("ws://localhost:1246")
+  Wire({
+    file: "test/user-limit-shrink",
+    wss: wss3,
+    userLimit: true,
+    defaultLimit: 0.0001,
+  })
+
   const pubKey = "_holster_user_public_key"
 
   // Send a put message to the server via WebSocket and wait for the ack.
@@ -57,6 +68,7 @@ describe("wire.user.limit", () => {
 
   const client1 = new WebSocket("ws://localhost:1244")
   const client2 = new WebSocket("ws://localhost:1245")
+  const client3 = new WebSocket("ws://localhost:1246")
 
   test("non-user data stored when userLimit:true and defaultLimit:0", (t, done) => {
     const soul = "ul_no_pub"
@@ -117,19 +129,58 @@ describe("wire.user.limit", () => {
     })
   })
 
+  test("a write that shrinks usage is stored even when already over the limit", (t, done) => {
+    const soul = "ul_shrink"
+    const ts1 = Date.now()
+    sendPut(client3, {
+      [soul]: {
+        _: {"#": soul, ">": {[pubKey]: ts1, x: ts1}},
+        [pubKey]: "shrinkPub",
+        x: "a long enough string to push comfortably past the tiny limit",
+      },
+    }).then(ack1 => {
+      assert.equal(ack1.err, null)
+      const ts2 = ts1 + 1
+      sendPut(client3, {
+        [soul]: {
+          _: {"#": soul, ">": {[pubKey]: ts2, x: ts2}},
+          [pubKey]: "shrinkPub",
+          x: null,
+        },
+      }).then(ack2 => {
+        assert.equal(ack2.err, null)
+        readFromDisk("test/user-limit-shrink", soul).then(node => {
+          assert.equal(
+            node.x,
+            null,
+            "a shrinking write should still be stored once already over the limit",
+          )
+          done()
+        })
+      })
+    })
+  })
+
   test("cleanup", (t, done) => {
     setTimeout(() => {
       fs.rm("test/user-limit-zero", {recursive: true, force: true}, err => {
         assert.equal(err, null)
         fs.rm("test/user-limit-allow", {recursive: true, force: true}, err => {
           assert.equal(err, null)
-          fs.rm("test/.user_storage.json", {force: true}, err => {
-            assert.equal(err, null)
-            fs.rm("test/.user_limit.json", {force: true}, err => {
+          fs.rm(
+            "test/user-limit-shrink",
+            {recursive: true, force: true},
+            err => {
               assert.equal(err, null)
-              done()
-            })
-          })
+              fs.rm("test/.user_storage.json", {force: true}, err => {
+                assert.equal(err, null)
+                fs.rm("test/.user_limit.json", {force: true}, err => {
+                  assert.equal(err, null)
+                  done()
+                })
+              })
+            },
+          )
         })
       })
     }, 100)
