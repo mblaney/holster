@@ -509,14 +509,18 @@ const Wire = (opt: HolsterOptions): WireAPI => {
           continue
         }
         const limit = userLimits.get(pub) ?? defaultLimit
-        if ((userStorage.get(pub) ?? 0) >= limit) continue
-        toStore[soul] = node
+        const current = userStorage.get(pub) ?? 0
         const oldBytes = oldGraphBytes[soul] ?? 0
         const newBytes = graph[soul] ? JSON.stringify(graph[soul]).length : 0
-        userStorage.set(
-          pub,
-          Math.max(0, (userStorage.get(pub) ?? 0) - oldBytes + newBytes),
-        )
+        const updated = Math.max(0, current - oldBytes + newBytes)
+        // A write that doesn't grow this user's total usage (e.g. a
+        // delete) is always let through, even past the limit - otherwise
+        // a user already over quota could never delete anything to get
+        // back under it. Only a write that both grows usage and pushes
+        // the total past the limit is rejected.
+        if (updated > current && updated > limit) continue
+        toStore[soul] = node
+        userStorage.set(pub, updated)
         saveUserStorage()
       }
       if (Object.keys(toStore).length > 0) {
@@ -730,15 +734,21 @@ const Wire = (opt: HolsterOptions): WireAPI => {
             if (!pub) continue
             const limit = userLimits.get(pub) ?? defaultLimit
             const current = userStorage.get(pub) ?? 0
-            if (current >= limit) {
-              if (cb) cb("storage limit exceeded")
-              return
-            }
             const oldBytes = oldGraphBytes[soul] ?? 0
             const newBytes = graph[soul]
               ? JSON.stringify(graph[soul]).length
               : 0
-            userStorage.set(pub, Math.max(0, current - oldBytes + newBytes))
+            const updated = Math.max(0, current - oldBytes + newBytes)
+            // A write that doesn't grow this user's total usage (e.g. a
+            // delete) is always let through, even past the limit -
+            // otherwise a user already over quota could never delete
+            // anything to get back under it. Only a write that both grows
+            // usage and pushes the total past the limit is rejected.
+            if (updated > current && updated > limit) {
+              if (cb) cb("storage limit exceeded")
+              return
+            }
+            userStorage.set(pub, updated)
             saveUserStorage()
           }
         }

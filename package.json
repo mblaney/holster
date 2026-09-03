@@ -1,11 +1,11 @@
 {
   "name": "@mblaney/holster",
-  "version": "2.1.4",
+  "version": "2.2.0",
   "description": "Holster is a service that allows synchronising data between devices using Node, Deno, Bun or the browser.",
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js test/system/*.test.js",
     "test:ts": "node --test --import tsx/esm ts/test/*.test.ts ts/test/system/*.test.ts",
     "build": "esbuild src/holster.js --bundle --format=esm --sourcemap \"--external:node:*\" \"--external:ws\" --minify --outdir=build",
     "build:ts": "esbuild ts/src/holster.ts --bundle --format=esm --sourcemap \"--external:node:*\" \"--external:ws\" --minify --outdir=dist",

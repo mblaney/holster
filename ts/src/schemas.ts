@@ -185,6 +185,7 @@ export const WireOptionsSchema = z
     secure: z.boolean().optional(),
     fast: z.boolean().optional(),
     put: z.boolean().optional(),
+    nested: z.boolean().optional(),
   })
   .optional()
 export type WireOptions = z.infer<typeof WireOptionsSchema>

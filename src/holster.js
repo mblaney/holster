@@ -2,6 +2,7 @@ import * as utils from "./utils.js"
 import Wire from "./wire.js"
 import User from "./user.js"
 import SEA from "./sea.js"
+import {attachNested} from "./nested.js"
 
 const Holster = opt => {
   if (typeof opt === "string") opt = {peers: [opt]}
@@ -14,6 +15,12 @@ const Holster = opt => {
   const map = new Map()
   // Allow concurrent calls to the api by storing each context.
   const allctx = new Map()
+  // Tracks on(..., {nested: true}) subscriptions, keyed by the caller's
+  // own callback (the same reference off() will be called with) - see
+  // attachNested in nested.js. The actual top-level/child listeners it
+  // creates use their own, separate contexts, so off() just needs to
+  // call the detach function this stores to tear the whole thing down.
+  const nested = new Map()
   // Serializes concurrent creation of a missing rel for the same
   // soul+item, so only the first caller creates it and the rest reuse
   // its result rather than each minting a competing soul. Map<soul,
@@ -680,6 +687,23 @@ const Holster = opt => {
         // Get the context to check if it has user info
         const ctx = allctx.get(ctxid)
 
+        if (_opt && _opt.nested) {
+          // attachNested calls this once for the top level and again for
+          // every discovered child, each needing its own independent
+          // context - a single shared _ctxid would accumulate .next()
+          // calls onto the same path instead of giving sibling paths.
+          const factory = () => {
+            const _ctxid = utils.text.random()
+            allctx.set(_ctxid, {
+              chain: [{item: item, soul: soul}],
+              user: ctx ? ctx.user : null,
+            })
+            return api(_ctxid)
+          }
+          nested.set(cb, attachNested(factory, cb, _get, _opt))
+          return
+        }
+
         // Flag that this context is set from on and shouldn't be removed.
         allctx.set(ctxid, {
           chain: [{item: item, soul: soul}],
@@ -834,6 +858,12 @@ const Holster = opt => {
         if (!ctxid) {
           console.log("error please provide a key using get(key)")
           if (cb) cb(null)
+          return
+        }
+
+        if (nested.has(cb)) {
+          nested.get(cb)()
+          nested.delete(cb)
           return
         }
 
