@@ -256,6 +256,54 @@ describe("holster.on", () => {
     })
   })
 
+  test("on for existing nested child key, two updates - two events", (t, done) => {
+    const nested = {
+      key: "nested key 2",
+      child: {
+        has: "child key",
+      },
+    }
+    // The node needs to exist before it can be listened to for updates.
+    holster.get("nested2").put(nested, err => {
+      assert.equal(err, null)
+
+      // on() only promises eventual delivery of each update, not exactly
+      // one callback per write, so just collect what arrives and check
+      // that both updates show up rather than enforcing a call count.
+      const seen: {has: string}[] = []
+      const childCallback = data => {
+        seen.push(data as {has: string})
+      }
+      holster.get("nested2").next("child").on(childCallback)
+
+      const checkDone = (): void => {
+        const hasFirst = seen.some(data => data.has === "child update 1")
+        const hasSecond = seen.some(data => data.has === "child update 2")
+        if (hasFirst && hasSecond) {
+          holster.get("nested2").next("child").off(childCallback)
+          done()
+        } else {
+          setTimeout(checkDone, 50)
+        }
+      }
+      checkDone()
+
+      setTimeout(() => {
+        holster.get("nested2").put({child: {has: "child update 1"}}, err => {
+          assert.equal(err, null)
+
+          setTimeout(() => {
+            holster
+              .get("nested2")
+              .put({child: {has: "child update 2"}}, err => {
+                assert.equal(err, null)
+              })
+          }, 200)
+        })
+      }, 10)
+    })
+  })
+
   test("cleanup", (t, done) => {
     fs.rm("test/holster.on", {recursive: true, force: true}, err => {
       assert.equal(err, null)

@@ -34,6 +34,15 @@ describe("wire", () => {
     peers: ["ws://localhost:1239"],
   })
 
+  // A tiny explicit maxMessageSize so the size-limit test below can trigger
+  // it with a small string, rather than needing to actually allocate
+  // something near the real (1MB) default just to exceed it.
+  const smallLimitWire = Wire({
+    file: "test/small-limit-wire",
+    peers: ["ws://localhost:1240"],
+    maxMessageSize: 100,
+  })
+
   // ws3 responds to a get for "batch_parent" with a put batch where
   // "batch_child" appears before "batch_parent" to exercise the pre-pass.
   // All other gets (e.g. check() public key lookups) receive an empty ack so
@@ -296,6 +305,47 @@ describe("wire", () => {
     assert.equal(stored._holster_user_public_key, pairA.pub)
   })
 
+  test("put larger than maxMessageSize is rejected with a clear error, without ever attempting to send", (t, done) => {
+    // put()'s callback has no documented once-only contract (same
+    // reasoning as on()'s callback, settled earlier) - only assert on the
+    // first invocation, which is guaranteed to carry the rejection since
+    // send()'s synchronous check runs before store.put's later, async
+    // local-persist completion.
+    let asserted = false
+    smallLimitWire.put(
+      {
+        oversized_soul: {
+          _: {"#": "oversized_soul", ">": {x: 1}},
+          x: "well over a hundred bytes once this whole message is built",
+        },
+      },
+      err => {
+        if (asserted) return
+        asserted = true
+        assert.match(err, /Message too large/)
+        done()
+      },
+    )
+  })
+
+  test("put within maxMessageSize is unaffected by the size check", (t, done) => {
+    let asserted = false
+    smallLimitWire.put(
+      {
+        s: {
+          _: {"#": "s", ">": {x: 1}},
+          x: "hi",
+        },
+      },
+      err => {
+        if (asserted) return
+        asserted = true
+        assert.equal(err, null)
+        done()
+      },
+    )
+  })
+
   test("offline PUT does not block subsequent GET", (t, done) => {
     offlineWire.put(
       {
@@ -365,7 +415,14 @@ describe("wire", () => {
                 {recursive: true, force: true},
                 err => {
                   assert.equal(err, null)
-                  done()
+                  fs.rm(
+                    "test/small-limit-wire",
+                    {recursive: true, force: true},
+                    err => {
+                      assert.equal(err, null)
+                      done()
+                    },
+                  )
                 },
               )
             })

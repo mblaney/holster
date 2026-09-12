@@ -1058,6 +1058,19 @@ const Wire = opt => {
   }
 
   const send = data => {
+    // Reject client-side, before ever attempting to send, rather than
+    // silently succeeding locally while the receiving peer's own
+    // validateMessage (wire.js's server-side inbound check) drops it and
+    // replies with an error nothing here is listening for - so a save
+    // that's too big to ever sync would otherwise look like it worked.
+    const maxMessageSize = opt.maxMessageSize || 1024 * 1024
+    if (data.length > maxMessageSize) {
+      return {
+        err: `Message too large (${data.length} > ${maxMessageSize} bytes). Reduce the size of the data being saved.`,
+        size: data.length,
+        maxMessageSize,
+      }
+    }
     if (messageQueue.length >= maxQueueLength) {
       return {
         err: `Message queue exceeded maximum length (${maxQueueLength}). Update query logic to request less data.`,
