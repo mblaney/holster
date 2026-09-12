@@ -39,8 +39,6 @@ const formatBytes = bytes => {
   return `${(bytes / 1073741824).toFixed(1)} GB`
 }
 
-const DEFAULT_STORAGE_LIMIT = 1 // MB
-
 const userStorage = readJSON(".user_storage.json")
 const userLimit = readJSON(".user_limit.json")
 
@@ -77,10 +75,13 @@ if (page.length > 0) {
 
 const data = userLimit.data || {}
 for (const {pub, total} of page) {
-  const pubLimit =
-    typeof data[pub] === "number" ? data[pub] : DEFAULT_STORAGE_LIMIT
+  const pubLimit = data[pub]
   const limitStr =
-    pubLimit === 0 ? "0 B (blocked)" : formatBytes(pubLimit * 1048576)
+    typeof pubLimit !== "number"
+      ? "no override (see server logs for default)"
+      : pubLimit === 0
+        ? "0 B (blocked)"
+        : formatBytes(pubLimit * 1048576)
   console.log(`  ${pub}`)
   console.log(`    used: ${formatBytes(total)} / limit: ${limitStr}`)
 }

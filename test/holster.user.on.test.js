@@ -287,6 +287,98 @@ describe("holster.user.on", () => {
     })
   })
 
+  test("on for not-yet-existing child key, two updates - two events", (t, done) => {
+    // Unlike the other nested tests, the parent ("container3") is put
+    // WITHOUT a "child" key at all - the listener subscribes before child
+    // has ever existed, so it has to stay on the parent (watching for
+    // child to become a rel later) rather than switching straight onto an
+    // already-existing rel's target at subscribe time.
+    user.get("container3").put({key: "container key"}, err => {
+      assert.equal(err, null)
+
+      // on() only promises eventual delivery of each update, not exactly
+      // one callback per write, so just collect what arrives and check
+      // that both updates show up rather than enforcing a call count.
+      const seen = []
+      const childCallback = data => {
+        seen.push(data)
+      }
+      user.get("container3").next("child").on(childCallback, true)
+
+      const checkDone = () => {
+        const hasFirst = seen.some(data => data.has === "child update 1")
+        const hasSecond = seen.some(data => data.has === "child update 2")
+        if (hasFirst && hasSecond) {
+          user.get("container3").next("child").off(childCallback)
+          done()
+        } else {
+          setTimeout(checkDone, 50)
+        }
+      }
+      checkDone()
+
+      setTimeout(() => {
+        user.get("container3").put({child: {has: "child update 1"}}, err => {
+          assert.equal(err, null)
+
+          setTimeout(() => {
+            user
+              .get("container3")
+              .put({child: {has: "child update 2"}}, err => {
+                assert.equal(err, null)
+              })
+          }, 200)
+        })
+      }, 10)
+    })
+  })
+
+  test("on for existing nested child key, two updates - two events", (t, done) => {
+    const nested = {
+      key: "nested key 2",
+      child: {
+        has: "child key",
+      },
+    }
+    // The node needs to exist before it can be listened to for updates.
+    user.get("nested2").put(nested, err => {
+      assert.equal(err, null)
+
+      // on() only promises eventual delivery of each update, not exactly
+      // one callback per write, so just collect what arrives and check
+      // that both updates show up rather than enforcing a call count.
+      const seen = []
+      const childCallback = data => {
+        seen.push(data)
+      }
+      user.get("nested2").next("child").on(childCallback)
+
+      const checkDone = () => {
+        const hasFirst = seen.some(data => data.has === "child update 1")
+        const hasSecond = seen.some(data => data.has === "child update 2")
+        if (hasFirst && hasSecond) {
+          user.get("nested2").next("child").off(childCallback)
+          done()
+        } else {
+          setTimeout(checkDone, 50)
+        }
+      }
+      checkDone()
+
+      setTimeout(() => {
+        user.get("nested2").put({child: {has: "child update 1"}}, err => {
+          assert.equal(err, null)
+
+          setTimeout(() => {
+            user.get("nested2").put({child: {has: "child update 2"}}, err => {
+              assert.equal(err, null)
+            })
+          }, 200)
+        })
+      }, 10)
+    })
+  })
+
   test("cleanup", (t, done) => {
     setTimeout(() => {
       fs.rm("test/holster.user.on", {recursive: true, force: true}, err => {

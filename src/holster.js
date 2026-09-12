@@ -65,6 +65,25 @@ const Holster = opt => {
     return `error ${error} cannot be converted to a graph`
   }
 
+  // Reads the current data at a rel's target soul, retrying briefly since a
+  // freshly created rel's target can still be mid-flight when first read.
+  // Shared by a one-off get() resolving rels found on the returned node,
+  // and by on()'s live retry when a watched property turns out to be a rel.
+  const readRelTarget = async (id, ctxUser, _opt, retries = 0) => {
+    const data = await new Promise(res => {
+      const _ctxid = utils.text.random()
+      allctx.set(_ctxid, {chain: [{item: null, soul: id}], user: ctxUser})
+      api(_ctxid).next(
+        null,
+        res,
+        retries === 0 ? utils.obj.put(_opt, "fast", true) : _opt,
+      )
+    })
+    if (data !== null || retries >= 5) return data
+    await new Promise(resolve => setTimeout(resolve, 50))
+    return readRelTarget(id, ctxUser, _opt, retries + 1)
+  }
+
   const api = ctxid => {
     const get = (lex, soul, ack, _opt) => {
       wire.get(
@@ -80,24 +99,13 @@ const Holster = opt => {
               Object.keys(msg.put[soul]).map(async key => {
                 const id = utils.rel.is(msg.put[soul][key])
                 if (!id) return
-                const attemptRead = async (retries = 0) => {
-                  const data = await new Promise(res => {
-                    const _ctxid = utils.text.random()
-                    const ctx = allctx.get(ctxid)
-                    allctx.set(_ctxid, {
-                      chain: [{item: null, soul: id}],
-                      user: ctx ? ctx.user : null,
-                    })
-                    api(_ctxid).next(null, res, _opt)
-                  })
-                  if (data !== null || retries >= 5) {
-                    return data
-                  }
-                  // Data not ready, retry after delay
-                  await new Promise(resolve => setTimeout(resolve, 50))
-                  return attemptRead(retries + 1)
-                }
-                msg.put[soul][key] = await attemptRead()
+
+                const ctx = allctx.get(ctxid)
+                msg.put[soul][key] = await readRelTarget(
+                  id,
+                  ctx ? ctx.user : null,
+                  _opt,
+                )
               }),
             )
             ack(msg.put[soul])
@@ -713,10 +721,19 @@ const Holster = opt => {
         // Map the user's callback because it can also be passed to off,
         // so need a reference to it to compare them.
         // Shared retry state for this on() subscription.
-        let retryCount = 0
         const maxRetries = 5
         const retryDelay = 1000 // Start with 1 second
         let retryTimer = null
+        // Which soul the persistent wire listener is currently attached to
+        // - starts on the parent (soul/item), and moves to a rel's target
+        // soul once item turns out to be one, since further updates land
+        // on the target's own soul, not the parent's. Tracked (rather than
+        // switching unconditionally) so the two places that can discover a
+        // rel - the initial check below and a later resolveValue retry -
+        // don't both re-register the same listener. Scoped to this one
+        // on() call's closure, so concurrent subscriptions (even on the
+        // same key) each track their own independently.
+        let listenedSoul = soul
 
         map.set(cb, () => {
           // Bail out if off() has already cleaned up this context — the mapped
@@ -728,84 +745,75 @@ const Holster = opt => {
           // have an update and should not call cb twice.
           clearTimeout(retryTimer)
           retryTimer = null
-          // When listener fires, re-check if the item is now a rel.
+
+          // Resolves {soul, item} to a genuine value, following a rel to its
+          // target if the property turns out to be one - checked fresh on
+          // every attempt, not just the first, since a property can still
+          // be a plain undefined/null on an early check and only become a
+          // rel once a later retry catches up (e.g. a nested rel-creating
+          // put both adds "item" as a rel on this node AND populates its
+          // target, and either half can still be mid-flight when the
+          // listener first fires). wire.get() can't reliably tell
+          // "genuinely null" apart from "hasn't landed yet" either - its
+          // own internal timeout fallback explicitly answers null when
+          // nothing comes back in time - so a null/missing value is
+          // retried a few times before being trusted as final, the same
+          // way the rel branch below already retries on a null target
+          // read.
+          const resolveValue = (retries, node, value) => {
+            const id = utils.rel.is(value)
+            if (id) {
+              if (listenedSoul !== id) {
+                wire.off({"#": listenedSoul}, map.get(cb))
+                wire.on({"#": id, ".": null}, map.get(cb), false, _opt)
+                listenedSoul = id
+              }
+              readRelTarget(id, ctx ? ctx.user : null, _opt).then(data => {
+                retryTimer = null
+                cb(data)
+              })
+              return
+            }
+
+            if (value !== undefined && value !== null) {
+              retryTimer = null
+              cb(value)
+              return
+            }
+            if (retries >= maxRetries) {
+              retryTimer = null
+              cb(value !== undefined ? value : null)
+              return
+            }
+            // Fast once the parent node already exists (a value is likely
+            // imminent); slow/exponential when it doesn't, since there's
+            // no signal anything is coming soon and fast polling would
+            // just waste requests.
+            const delay = node
+              ? 50
+              : Math.min(retryDelay * Math.pow(2, retries), 30000)
+            retryTimer = setTimeout(() => {
+              wire.get(
+                {"#": soul, ".": item},
+                msg => {
+                  const retryNode = msg.put && msg.put[soul]
+                  resolveValue(
+                    retries + 1,
+                    retryNode,
+                    retryNode && retryNode[item],
+                  )
+                },
+                {..._opt, secure: !!(ctx.user || opt.secure)},
+              )
+            }, delay)
+          }
+
+          // When listener fires, re-check the item's current state.
           wire.get(
             {"#": soul, ".": item},
             msg => {
               const node = msg.put && msg.put[soul]
-              const current = node && node[item]
-              const id = utils.rel.is(current)
-              if (id) {
-                // It's a rel, read the related node. It might not be in the
-                // graph yet when the listener fires, so we retry with delays.
-                const attemptRead = async (retries = 0) => {
-                  const data = await new Promise(res => {
-                    const _ctxid = utils.text.random()
-                    allctx.set(_ctxid, {
-                      chain: [{item: null, soul: id}],
-                      user: ctx ? ctx.user : null,
-                    })
-                    api(_ctxid).next(
-                      null,
-                      res,
-                      retries === 0 ? utils.obj.put(_opt, "fast", true) : _opt,
-                    )
-                  })
-                  if (data !== null || retries >= 5) {
-                    retryCount = 0 // Reset retry counter on success
-                    cb(data)
-                  } else {
-                    // Data not ready, retry after delay
-                    await new Promise(resolve => setTimeout(resolve, 50))
-                    attemptRead(retries + 1)
-                  }
-                }
-                attemptRead()
-              } else {
-                // It's a direct property or null.
-                const nodeExists = !!node
-
-                if (nodeExists) {
-                  // Node exists — return the value and reset retry state.
-                  retryCount = 0
-                  cb(current !== undefined ? current : null)
-                } else if (retryCount < maxRetries) {
-                  // No data yet — keep polling until we get a response or
-                  // exhaust retries. on() with _get can return null on a cache
-                  // miss and never fire again if the data doesn't change while
-                  // the listener is attached, so we must poll for initial load.
-                  const retry = () => {
-                    const delay = Math.min(
-                      retryDelay * Math.pow(2, retryCount),
-                      30000,
-                    )
-                    retryCount++
-                    retryTimer = setTimeout(() => {
-                      wire.get(
-                        {"#": soul, ".": item},
-                        msg => {
-                          const retryNode = msg.put && msg.put[soul]
-                          if (retryNode) {
-                            retryCount = 0
-                            retryTimer = null
-                            const retryValue = retryNode[item]
-                            cb(retryValue !== undefined ? retryValue : null)
-                          } else if (retryCount < maxRetries) {
-                            retry()
-                          } else {
-                            retryTimer = null
-                            cb(null)
-                          }
-                        },
-                        {..._opt, secure: !!(ctx.user || opt.secure)},
-                      )
-                    }, delay)
-                  }
-                  retry()
-                } else {
-                  cb(null)
-                }
-              }
+              resolveValue(0, node, node && node[item])
             },
             {..._opt, secure: !!(ctx.user || opt.secure)},
           )
@@ -840,11 +848,14 @@ const Holster = opt => {
             const current = msg.put && msg.put[soul] && msg.put[soul][item]
             const id = utils.rel.is(current)
             if (id) {
-              // It's a rel, need to switch listener to the related node
-              // First remove the initial listener
-              wire.off(initialLex, map.get(cb))
-              // Then add listener on the related node
-              wire.on({"#": id, ".": null}, map.get(cb), false, _opt)
+              // It's a rel, need to switch listener to the related node -
+              // unless resolveValue (triggered by the initial listener
+              // firing) already beat this check to it.
+              if (listenedSoul !== id) {
+                wire.off({"#": listenedSoul}, map.get(cb))
+                wire.on({"#": id, ".": null}, map.get(cb), false, _opt)
+                listenedSoul = id
+              }
               if (_get) map.get(cb)()
             } else if (_get) {
               // Not a rel, but _get was requested, so trigger callback.
