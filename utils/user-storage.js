@@ -69,7 +69,7 @@ const page = users.slice(offset, offset + limit)
 console.log(`  Total users: ${users.length}`)
 if (page.length > 0) {
   console.log(
-    `  Showing full public keys for ${page.length} user${page.length !== 1 ? "s" : ""} (offset: ${offset}, limit: ${limit})`,
+    `  Showing public keys for ${page.length} user${page.length !== 1 ? "s" : ""} (query: --offset ${offset} --limit ${limit})`,
   )
 }
 
@@ -78,10 +78,10 @@ for (const {pub, total} of page) {
   const pubLimit = data[pub]
   const limitStr =
     typeof pubLimit !== "number"
-      ? "no override (see server logs for default)"
+      ? "server default"
       : pubLimit === 0
-        ? "0 B (blocked)"
+        ? "blocked"
         : formatBytes(pubLimit * 1048576)
   console.log(`  ${pub}`)
-  console.log(`    used: ${formatBytes(total)} / limit: ${limitStr}`)
+  console.log(`    used: ${formatBytes(total)} / ${limitStr}`)
 }

@@ -304,6 +304,33 @@ describe("holster.on", () => {
     })
   })
 
+  // A single put can create several missing levels of a path at once.
+  // Resolving the first missing level recurses into resolving the next -
+  // but by then the next level may already exist too, so a listener
+  // registered for it at that point misses the creation entirely.
+  test("nested on() still fires when a put creates several missing levels at once", (t, done) => {
+    let fired = false
+    const cb = (data: unknown): void => {
+      if (data && !fired) {
+        fired = true
+        assert.equal((data as {first: {has: string}}).first.has, "value")
+        holster.get("nested3").next("inner").off(cb)
+        done()
+      }
+    }
+    holster.get("nested3").next("inner").on(cb, true, {nested: true})
+
+    setTimeout(() => {
+      holster
+        .get("nested3")
+        .next("inner")
+        .next("first")
+        .put({has: "value"}, err => {
+          assert.equal(err, null)
+        })
+    }, 10)
+  })
+
   test("cleanup", (t, done) => {
     fs.rm("test/holster.on", {recursive: true, force: true}, err => {
       assert.equal(err, null)
