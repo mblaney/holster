@@ -167,7 +167,7 @@ const Holster = opt => {
             const node = msg.put && msg.put[soul]
             const id = utils.rel.is(node && node[item])
             if (!id) {
-              // If it's a plain value (not a rel) and this is a get, deliver it.
+              // If it's a plain value (not a rel) and using get, deliver it.
               // node._ guards against timeout null-acks which lack metadata.
               if (!on && node && node._ && typeof node[item] !== "undefined") {
                 if (timer) clearTimeout(timer)
@@ -189,7 +189,9 @@ const Holster = opt => {
           {...request._opt, secure: !!(ctx.user || opt.secure)},
         )
       }
-      wire.on({"#": soul, ".": item}, handler, false, request._opt)
+      // The get parameter is set to true to call handler immediately for
+      // listeners set on nested properties.
+      wire.on({"#": soul, ".": item}, handler, true, request._opt)
       // Time out after the same total duration as the on() retry loop
       // (1+2+4+8+16 = 31s) so callers are not blocked forever if the node
       // genuinely doesn't exist.
@@ -325,7 +327,7 @@ const Holster = opt => {
                   api(ctxid).put(request.put, cb)
                 })
               } else if (on) {
-                // Item is not a rel yet — watch the parent soul for when it
+                // Item is not a rel yet - watch the parent soul for when it
                 // becomes one, then retry chain resolution.
                 watchForRel(soul, item, ctx, i, request, cb)
                 if (request._get) cb(null)
@@ -346,7 +348,7 @@ const Holster = opt => {
               })
             } else {
               if (on) {
-                // Node doesn't exist yet — watch for it to appear.
+                // Node doesn't exist yet - watch for it to appear.
                 watchForRel(soul, item, ctx, i, request, cb)
                 if (request._get) cb(null)
               } else if (get && node) {
@@ -356,14 +358,14 @@ const Holster = opt => {
                   Object.keys(sv).length > 0 &&
                   typeof sv[item] === "undefined"
                 ) {
-                  // State vector has other properties but not this one — never written.
+                  // State vector has other properties but not this one.
                   if (cb) cb(null)
                 } else {
-                  // Empty state vector or item is tracked — may arrive via push.
+                  // Empty state vector or item is tracked, may arrive via push.
                   watchForRel(soul, item, ctx, i, request, cb, false)
                 }
               } else {
-                // Soul doesn't exist or no get — return null.
+                // Soul doesn't exist or no get - return null.
                 if (cb) cb(null)
               }
             }
@@ -698,7 +700,7 @@ const Holster = opt => {
         if (_opt && _opt.nested) {
           // attachNested calls this once for the top level and again for
           // every discovered child, each needing its own independent
-          // context - a single shared _ctxid would accumulate .next()
+          // context. A single shared _ctxid would accumulate .next()
           // calls onto the same path instead of giving sibling paths.
           const factory = () => {
             const _ctxid = utils.text.random()
@@ -724,37 +726,36 @@ const Holster = opt => {
         const maxRetries = 5
         const retryDelay = 1000 // Start with 1 second
         let retryTimer = null
-        // Which soul the persistent wire listener is currently attached to
-        // - starts on the parent (soul/item), and moves to a rel's target
-        // soul once item turns out to be one, since further updates land
-        // on the target's own soul, not the parent's. Tracked (rather than
-        // switching unconditionally) so the two places that can discover a
-        // rel - the initial check below and a later resolveValue retry -
-        // don't both re-register the same listener. Scoped to this one
-        // on() call's closure, so concurrent subscriptions (even on the
-        // same key) each track their own independently.
+        // Which soul the persistent wire listener is currently attached to.
+        // Starts on the parent (soul/item), and moves to a rel's target soul
+        // once item is created, since further updates land on the target's own
+        // soul, not the parent's. Tracked rather than switching unconditionally
+        // so that the two places that can discover a rel - the initial check
+        // below and a later resolveValue retry - don't both re-register the
+        // same listener. Scoped to this one on() call's closure, so concurrent
+        // subscriptions (even on the same key) can each track their own.
         let listenedSoul = soul
 
         map.set(cb, () => {
-          // Bail out if off() has already cleaned up this context — the mapped
+          // Bail out if off() has already cleaned up this context. The mapped
           // callback can fire twice (once from wire.on and once from the _get
           // immediate-read path) and the second call after async context
           // cleanup would crash in resolve(). Matches the guard in watchForRel.
           if (!allctx.has(ctxid)) return
-          // Cancel any pending retry — the persistent listener firing means we
+
+          // Cancel any pending retry. The persistent listener firing means we
           // have an update and should not call cb twice.
           clearTimeout(retryTimer)
           retryTimer = null
 
           // Resolves {soul, item} to a genuine value, following a rel to its
-          // target if the property turns out to be one - checked fresh on
-          // every attempt, not just the first, since a property can still
-          // be a plain undefined/null on an early check and only become a
-          // rel once a later retry catches up (e.g. a nested rel-creating
-          // put both adds "item" as a rel on this node AND populates its
-          // target, and either half can still be mid-flight when the
-          // listener first fires). wire.get() can't reliably tell
-          // "genuinely null" apart from "hasn't landed yet" either - its
+          // target if the property turns out to be one. This is checked on
+          // every attempt, since a property can still be a plain undefined/null
+          // on an early check and only become a rel once a later retry catches
+          // up (e.g. a nested rel-creating put both adds "item" as a rel on
+          // this node AND populates its target, and either half can still be
+          // mid-flight when the listener first fires). Also wire.get() can't
+          // reliably tell "genuinely null" apart from "hasn't landed yet", its
           // own internal timeout fallback explicitly answers null when
           // nothing comes back in time - so a null/missing value is
           // retried a few times before being trusted as final, the same
@@ -848,7 +849,7 @@ const Holster = opt => {
             const current = msg.put && msg.put[soul] && msg.put[soul][item]
             const id = utils.rel.is(current)
             if (id) {
-              // It's a rel, need to switch listener to the related node -
+              // It's a rel, need to switch listener to the related node,
               // unless resolveValue (triggered by the initial listener
               // firing) already beat this check to it.
               if (listenedSoul !== id) {
@@ -878,7 +879,7 @@ const Holster = opt => {
           return
         }
 
-        // Resolve the current context before removing event listener.
+        // Resolve the current context before removing the event listener.
         const {item, soul} = resolve({off: true}, cb)
         if (!soul) return
 

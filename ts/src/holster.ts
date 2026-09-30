@@ -291,7 +291,9 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           },
         )
       }
-      wire.on({"#": soul, ".": item}, handler, false, request._opt)
+      // The get parameter is set to true to call handler immediately for
+      // listeners set on nested properties.
+      wire.on({"#": soul, ".": item}, handler, true, request._opt)
       // Time out after the same total duration as the on() retry loop
       // (1+2+4+8+16 = 31s) so callers are not blocked forever if the node
       // genuinely doesn't exist.
