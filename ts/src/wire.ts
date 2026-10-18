@@ -556,7 +556,15 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     })
 
     if (ack) {
-      if (!isNode) {
+      // Put requests only need a local answer - skip the wire round-trip
+      // (matches the same check below, once store.get is reached instead
+      // of this fast graph path). Without this, check()'s own bare
+      // full-node lookup - always {put: true} - re-sends on the wire every
+      // time it's called once the soul's been through store.get once (see
+      // hasNode above), and since its own reply re-enters put() and calls
+      // check() again, this becomes a self-sustaining loop: a get every
+      // ~recentCheckTTL, forever, per soul, for every soul ever fetched.
+      if (!isNode && !opts.put) {
         // Client: send request on the wire to check for updates,
         // since it may have missed puts while disconnected.
         // Skip if the same lex was checked recently to avoid flooding.
