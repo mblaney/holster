@@ -84,6 +84,24 @@ const Holster = opt => {
     return readRelTarget(id, ctxUser, _opt, retries + 1)
   }
 
+  // Wraps a not-yet-terminal chain object (api(ctxid), returned wherever no
+  // callback was given to resolve it yet) with a .then, so awaiting it
+  // resolves the same way a callback given right here would - mirrors
+  // readRelTarget's own api(ctxid).next(null, cb) idiom, which resolves the
+  // current chain without pushing a new key onto it. There's no separate
+  // error channel on this path (get/next's own callback only ever receives
+  // a value, never an error), so reject is simply never called - a
+  // rejection-less promise is still a valid one. Deliberately only applied
+  // at these specific "chain not yet resolved" return points, not to
+  // api()'s own bare object (see holster.user(), which Object.assigns that
+  // onto the long-lived user object) - that object has no chain to resolve
+  // at all, and giving user itself a .then would make a bare `await user`
+  // (or passing it to Promise.all, etc) silently try to resolve one.
+  const awaitable = chainApi => ({
+    ...chainApi,
+    then: resolve => chainApi.next(null, resolve),
+  })
+
   const api = ctxid => {
     const get = (lex, soul, ack, _opt) => {
       wire.get(
@@ -412,7 +430,7 @@ const Holster = opt => {
         // to be objects.
         ctxid = utils.text.random()
         allctx.set(ctxid, {chain: [{item: String(key), soul: "root"}], cb: cb})
-        if (!cb) return api(ctxid)
+        if (!cb) return awaitable(api(ctxid))
 
         const _done = done(ctxid)
         // When there's a callback need to resolve the context first.
@@ -467,7 +485,7 @@ const Holster = opt => {
         // Push the key to the context as it needs a soul lookup.
         // (null is used to call the api with updated context)
         if (key !== null) ctx.chain.push({item: String(key), soul: null})
-        if (!ctx.cb) return api(ctxid)
+        if (!ctx.cb) return awaitable(api(ctxid))
 
         // When there's a callback need to resolve the context first.
         const {soul} = resolve({get: lex, _opt: _opt}, _ack)
@@ -477,6 +495,25 @@ const Holster = opt => {
         if (typeof set === "function") {
           cb = set
           set = false
+        }
+        // Unlike get/next (see awaitable above), put's own callback always
+        // receives an error channel - an error string, or undefined on
+        // success - so a promise here can reject, not just resolve.
+        if (!cb) {
+          const promise = new Promise((resolve, reject) => {
+            api(ctxid).put(data, set, err =>
+              err ? reject(new Error(err)) : resolve(),
+            )
+          })
+          // A caller using the old fire-and-forget idiom (put(data) with
+          // no callback, result never touched) shouldn't crash the
+          // process on an unhandled rejection if something genuinely
+          // fails now that this returns a promise - doesn't suppress the
+          // rejection for a caller that does await/catch it, since a
+          // promise can have more than one handler attached (same
+          // pattern as createRel's own promise above).
+          promise.catch(() => {})
+          return promise
         }
         const ack = ctxid => {
           return data => {
@@ -619,13 +656,14 @@ const Holster = opt => {
 
                   const _ctxid = utils.text.random()
                   const chain = [{item: item, soul: soul}]
-                  // Pass on the previous ctx's callback and user flag here.
-                  allctx.set(_ctxid, {
-                    chain: chain,
-                    user: ctx.user,
-                    cb: ctx.cb,
-                  })
-                  api(_ctxid).put(data)
+                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                  // Pass on the previous ctx's own callback (if any)
+                  // positionally rather than pre-registering it via
+                  // allctx - otherwise it's invisible to put's own "no cb
+                  // given" check above, which would then wrap this retry
+                  // in a brand new promise competing with (and never
+                  // actually calling) the real one.
+                  api(_ctxid).put(data, ctx.cb)
                 })
                 return
               }
@@ -952,7 +990,7 @@ const Holster = opt => {
             ctxid = utils.text.random()
             const chain = [{item: String(key), soul: "~" + pub}]
             allctx.set(ctxid, {chain: chain, user: user.is, cb: cb})
-            if (!cb) return api(ctxid)
+            if (!cb) return awaitable(api(ctxid))
 
             // When there's a callback need to resolve the context first.
             const _done = done(ctxid)

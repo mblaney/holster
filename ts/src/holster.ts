@@ -28,34 +28,54 @@ export interface HolsterAPI {
   get: {
     (
       key: string | null,
-      lex?: LexWithDot,
-      cb?: (data: unknown) => void,
+      lex: LexWithDot,
+      cb: (data: unknown) => void,
       _opt?: WireOptions,
     ): HolsterAPI
     (
       key: string | null,
-      cb?: (data: unknown) => void,
+      cb: (data: unknown) => void,
       _opt?: WireOptions,
     ): HolsterAPI
+    (
+      key: string | null,
+      lex?: LexWithDot,
+      _opt?: WireOptions,
+    ): AwaitableHolsterAPI
   }
   next: {
     (
       key: string | null,
-      lex?: LexWithDot,
-      cb?: (data: unknown) => void,
+      lex: LexWithDot,
+      cb: (data: unknown) => void,
       _opt?: WireOptions,
     ): HolsterAPI
     (
       key: string | null,
-      cb?: (data: unknown) => void,
+      cb: (data: unknown) => void,
       _opt?: WireOptions,
     ): HolsterAPI
+    (
+      key: string | null,
+      lex?: LexWithDot,
+      _opt?: WireOptions,
+    ): AwaitableHolsterAPI
   }
-  put: (
-    data: GraphValue | Record<string, GraphValue>,
-    set?: boolean | ((data?: string | null) => void),
-    cb?: (data?: string | null) => void,
-  ) => HolsterAPI | void
+  put: {
+    (
+      data: GraphValue | Record<string, GraphValue>,
+      set: boolean,
+      cb: (data?: string | null) => void,
+    ): void
+    (
+      data: GraphValue | Record<string, GraphValue>,
+      cb: (data?: string | null) => void,
+    ): void
+    (
+      data: GraphValue | Record<string, GraphValue>,
+      set?: boolean,
+    ): Promise<void>
+  }
   on: {
     (
       lex: LexWithDot,
@@ -70,6 +90,23 @@ export interface HolsterAPI {
   wire: WireAPI
   SEA: typeof SEA
 }
+
+// Deliberately not the built-in PromiseLike<T> - that also requires a
+// return value and an onrejected param awaitable's own then() never uses
+// (there's no separate error channel on this path, see awaitable's own
+// comment). TS's Awaited<T> only needs a callable then(onfulfilled, ...)
+// to recognize something as thenable - this minimal shape is enough for
+// `await` to work and to correctly infer the resolved type as unknown.
+interface Thenable {
+  then: (resolve: (data: unknown) => void) => void
+}
+
+// A chain object (api(ctxid), returned wherever no callback was given to
+// resolve it yet) with a .then added, so `await`-ing it resolves the same
+// way a callback given right here would (see awaitable in holster.ts).
+// Only the "no callback given" get/next overloads above return this -
+// the "has a real callback" ones genuinely don't have a .then.
+export type AwaitableHolsterAPI = HolsterAPI & Thenable
 
 const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
   let options: HolsterOptions
@@ -155,6 +192,25 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
     await new Promise(resolve => setTimeout(resolve, 50))
     return readRelTarget(id, ctxUser, opt, retries + 1)
   }
+
+  // Wraps a not-yet-terminal chain object (api(ctxid), returned wherever no
+  // callback was given to resolve it yet) with a .then, so awaiting it
+  // resolves the same way a callback given right here would - mirrors
+  // readRelTarget's own api(ctxid).next(null, cb) idiom, which resolves the
+  // current chain without pushing a new key onto it. There's no separate
+  // error channel on this path (get/next's own callback only ever receives
+  // a value, never an error), so reject is simply never called - a
+  // rejection-less promise is still a valid one. Deliberately only applied
+  // at these specific "chain not yet resolved" return points, not to
+  // api()'s own bare object (see holster.user(), which Object.assigns that
+  // onto the long-lived user object) - that object has no chain to resolve
+  // at all, and giving user itself a .then would make a bare `await user`
+  // (or passing it to Promise.all, etc) silently try to resolve one.
+  const awaitable = (chainApi: HolsterAPI): AwaitableHolsterAPI => ({
+    ...chainApi,
+    then: (resolve: (data: unknown) => void) =>
+      chainApi.next(null, resolve as never),
+  })
 
   const api = (initCtxid?: string): HolsterAPI => {
     let ctxid = initCtxid
@@ -559,7 +615,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           chain: [{item: String(key), soul: "root"}],
           cb: callback,
         })
-        if (!callback) return api(ctxid)
+        if (!callback) return awaitable(api(ctxid))
 
         const _done = done(ctxid)
         const result = resolve({get: lexFilter, _opt: opts}, _done)
@@ -624,7 +680,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         }
 
         if (key !== null) ctx.chain.push({item: String(key), soul: null})
-        if (!ctx.cb) return api(ctxid)
+        if (!ctx.cb) return awaitable(api(ctxid))
 
         const result = resolve({get: lexFilter, _opt: opts}, _ack)
         if (result) get(lexFilter as never, result.soul!, _ack, opts)
@@ -635,7 +691,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         data: GraphValue | Record<string, GraphValue>,
         set?: boolean | ((data?: string | null) => void),
         cb?: (data?: string | null) => void,
-      ): HolsterAPI | void {
+      ): void | Promise<void> {
         let isSet = false
         let callback: ((data?: string | null) => void) | undefined
 
@@ -645,6 +701,26 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         } else {
           isSet = set || false
           callback = cb
+        }
+
+        // Unlike get/next (see awaitable above), put's own callback always
+        // receives an error channel - an error string, or undefined on
+        // success - so a promise here can reject, not just resolve.
+        if (!callback) {
+          const promise = new Promise<void>((promiseResolve, reject) => {
+            api(ctxid).put(data, isSet, err =>
+              err ? reject(new Error(err)) : promiseResolve(),
+            )
+          })
+          // A caller using the old fire-and-forget idiom (put(data) with
+          // no callback, result never touched) shouldn't crash the
+          // process on an unhandled rejection if something genuinely
+          // fails now that this returns a promise - doesn't suppress the
+          // rejection for a caller that does await/catch it, since a
+          // promise can have more than one handler attached (same
+          // pattern as createRel's own promise above).
+          promise.catch(() => {})
+          return promise
         }
 
         const ack = (ctxid: string) => {
@@ -797,12 +873,14 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
 
                   const _ctxid = utils.text.random()
                   const chain: ChainItem[] = [{item: item!, soul: soul}]
-                  allctx.set(_ctxid, {
-                    chain: chain,
-                    user: ctx.user,
-                    cb: ctx.cb,
-                  })
-                  api(_ctxid).put(data)
+                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                  // Pass on the previous ctx's own callback (if any)
+                  // positionally rather than pre-registering it via
+                  // allctx - otherwise it's invisible to put's own "no cb
+                  // given" check above, which would then wrap this retry
+                  // in a brand new promise competing with (and never
+                  // actually calling) the real one.
+                  api(_ctxid).put(data, ctx.cb as never)
                 })
                 return
               }
@@ -864,7 +942,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           )
         }
         attemptRead()
-      },
+      } as HolsterAPI["put"],
 
       on: function (
         lex: LexWithDot | ((data: unknown) => void),
@@ -1199,7 +1277,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               user: user.is,
               cb: callback as never,
             })
-            if (!callback) return api(ctxid)
+            if (!callback) return awaitable(api(ctxid))
 
             const _done = done(ctxid)
             const resolved = resolve({get: lexFilter, _opt: opts}, _done)

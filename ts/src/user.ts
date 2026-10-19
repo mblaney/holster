@@ -12,7 +12,7 @@ import type {
   LexFilter,
   WireOptions,
 } from "./schemas.ts"
-import type {HolsterAPI} from "./holster.ts"
+import type {HolsterAPI, AwaitableHolsterAPI} from "./holster.ts"
 
 type WireInterface = ReturnType<typeof Wire>
 
@@ -42,12 +42,24 @@ export interface UserInterface {
     password: string,
     cb?: (err?: string | null) => void,
   ) => void
-  get?(
-    keys: string | string[],
-    lex?: LexFilter | ((data: unknown) => void),
-    cb?: ((data: unknown) => void) | WireOptions,
-    _opt?: WireOptions,
-  ): HolsterAPI
+  get?: {
+    (
+      keys: string | string[],
+      lex: LexFilter,
+      cb: (data: unknown) => void,
+      _opt?: WireOptions,
+    ): HolsterAPI
+    (
+      keys: string | string[],
+      cb: (data: unknown) => void,
+      _opt?: WireOptions,
+    ): HolsterAPI
+    (
+      keys: string | string[],
+      lex?: LexFilter,
+      _opt?: WireOptions,
+    ): AwaitableHolsterAPI
+  }
 }
 
 /**
