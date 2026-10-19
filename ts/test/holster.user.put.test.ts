@@ -30,6 +30,11 @@ describe("holster.user.put", () => {
     })
   })
 
+  test("put and get with no callback can both be awaited", async () => {
+    await user.get("awaited").put("value")
+    assert.equal(await user.get("awaited"), "value")
+  })
+
   test("put and get string", (t, done) => {
     user.get("key").put("value", err => {
       assert.equal(err, null)

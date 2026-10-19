@@ -85,6 +85,22 @@ describe("holster.get", () => {
     })
   })
 
+  test("get with no callback can be awaited, resolving to the same value a callback would receive", async () => {
+    const data = await holster.get("unknown")
+    assert.equal(data, null)
+  })
+
+  test("next with no callback can be awaited, resolving to the current chain's value", async () => {
+    const data = await holster.get("chained").next("unknown")
+    assert.equal(data, null)
+  })
+
+  test("put then awaiting get sees the put's own value, without either call passing a callback", async () => {
+    await holster.get("awaited").put("value")
+    const data = await holster.get("awaited")
+    assert.equal(data, "value")
+  })
+
   test("cleanup", (t, done) => {
     fs.rm("test/holster.get", {recursive: true, force: true}, err => {
       assert.equal(err, null)

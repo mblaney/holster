@@ -357,6 +357,48 @@ describe("holster.put", () => {
     })
   })
 
+  test("put with no callback can be awaited, resolving on success", async () => {
+    await holster.get("awaited").put("value")
+    assert.equal(await holster.get("awaited"), "value")
+  })
+
+  test("put with no callback rejects with an Error on a real failure", async () => {
+    const secureHolster: HolsterAPI = Holster({
+      file: "test/holster.put.secure",
+      wss: wss,
+      secure: true,
+    })
+    await assert.rejects(
+      () => secureHolster.get("key").put("value"),
+      (err: unknown) => err instanceof Error,
+    )
+    await new Promise<void>((resolve, reject) =>
+      fs.rm("test/holster.put.secure", {recursive: true, force: true}, err =>
+        err ? reject(err) : resolve(),
+      ),
+    )
+  })
+
+  // Regression: putting an object (not a plain scalar) onto a chain
+  // position whose rel doesn't exist yet goes through a retry that creates
+  // the rel first, then re-puts (see createRel/attemptRead in holster.ts)
+  // - this used to pre-register the awaiting caller's own callback
+  // directly on the retry's context instead of passing it positionally,
+  // which meant put's own "no callback given" check (just above) never
+  // saw it and wrapped the retry in a second, unrelated promise that never
+  // actually settled, leaving the original caller's own await pending
+  // forever.
+  test("awaited put of a nested object through a not-yet-existing chain position still resolves", async () => {
+    await holster
+      .get("brand-new-chain-parent")
+      .next("branch")
+      .put({leaf: "value"})
+    assert.deepEqual(
+      await holster.get("brand-new-chain-parent").next("branch"),
+      {leaf: "value"},
+    )
+  })
+
   test("cleanup", (t, done) => {
     fs.rm("test/holster.put", {recursive: true, force: true}, err => {
       assert.equal(err, null)
