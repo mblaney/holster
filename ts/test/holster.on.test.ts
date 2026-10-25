@@ -331,6 +331,28 @@ describe("holster.on", () => {
     }, 10)
   })
 
+  test("on with get after writing one property of a stored node - every property", async () => {
+    const first: HolsterAPI = Holster({
+      file: "test/holster.on.partial",
+      wss: new Server("ws://localhost:1243"),
+    })
+    await first.get("partial").put({one: "a", two: "b"})
+
+    // A fresh instance on the same store starts with an empty graph, like a
+    // page load - writing one property mustn't hide the others from on().
+    const second: HolsterAPI = Holster({
+      file: "test/holster.on.partial",
+      wss: new Server("ws://localhost:1244"),
+    })
+    await second.get("partial").next("three").put("c")
+
+    const data = await new Promise(resolve =>
+      second.get("partial").on(resolve, true),
+    )
+    assert.deepEqual(data, {one: "a", two: "b", three: "c"})
+    fs.rmSync("test/holster.on.partial", {recursive: true, force: true})
+  })
+
   test("cleanup", (t, done) => {
     fs.rm("test/holster.on", {recursive: true, force: true}, err => {
       assert.equal(err, null)

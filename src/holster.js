@@ -73,11 +73,7 @@ const Holster = opt => {
     const data = await new Promise(res => {
       const _ctxid = utils.text.random()
       allctx.set(_ctxid, {chain: [{item: null, soul: id}], user: ctxUser})
-      api(_ctxid).next(
-        null,
-        res,
-        retries === 0 ? utils.obj.put(_opt, "fast", true) : _opt,
-      )
+      api(_ctxid).next(null, res, _opt)
     })
     if (data !== null || retries >= 5) return data
     await new Promise(resolve => setTimeout(resolve, 50))

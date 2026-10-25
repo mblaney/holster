@@ -593,12 +593,12 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       return
     }
 
-    store.get(lex, (err, ack) => {
-      if (ack) {
+    store.get(lex, (err, stored) => {
+      if (stored) {
         // Populate in-memory graph from store data before sending the server
         // request, so stale server responses with older state are correctly
         // rejected by ham.mix.
-        for (const [soul, node] of Object.entries(ack)) {
+        for (const [soul, node] of Object.entries(stored)) {
           if (!node) continue
           if (!graph[soul]) {
             graph[soul] = {...node} as unknown as Graph[string]
@@ -622,40 +622,44 @@ const Wire = (opt: HolsterOptions): WireAPI => {
           }
         }
         // Full-node fetch: the graph is now complete for this soul.
-        if (!lex["."] && ack[lex["#"]]) hasNode.add(lex["#"])
-        // Only serve from store if the requested property is present.
-        const node = ack[lex["#"]]
-        const hasProperty =
-          node &&
-          Object.keys(node).some(
-            key => key !== "_" && utils.match(lex["."], key),
-          )
-        if (hasProperty) {
-          // Public keys are immutable once written — never need a wire check.
-          if (!isNode && lex["."] !== utils.userPublicKey) {
-            if (!lex["."] || typeof lex["."] === "string") {
-              const checkKey = lex["#"] + (lex["."] ? "." + lex["."] : "")
-              const now = Date.now()
-              const lastCheck = recentChecks.get(checkKey)
-              if (!lastCheck || now - lastCheck > recentCheckTTL) {
-                recentChecks.set(checkKey, now)
-                const sendResult = send(request)
-                if (sendResult && sendResult.err) {
-                  cb({err: sendResult.err})
-                  return
-                }
-              }
-            } else {
+        if (!lex["."] && stored[lex["#"]]) hasNode.add(lex["#"])
+      }
+
+      // Answered from the graph rather than the raw store result: the merge
+      // above keeps any newer in-memory values, so a local put that store
+      // hasn't finished persisting yet is still included, while everything
+      // already on disk fills in the rest of the node.
+      const ack = {...stored, ...Get(lex, graph, true)}
+      // Only serve locally if the requested property is present.
+      const node = ack[lex["#"]]
+      const hasProperty =
+        node &&
+        Object.keys(node).some(key => key !== "_" && utils.match(lex["."], key))
+      if (hasProperty) {
+        // Public keys are immutable once written - never need a wire check.
+        if (!isNode && lex["."] !== utils.userPublicKey) {
+          if (!lex["."] || typeof lex["."] === "string") {
+            const checkKey = lex["#"] + (lex["."] ? "." + lex["."] : "")
+            const now = Date.now()
+            const lastCheck = recentChecks.get(checkKey)
+            if (!lastCheck || now - lastCheck > recentCheckTTL) {
+              recentChecks.set(checkKey, now)
               const sendResult = send(request)
               if (sendResult && sendResult.err) {
                 cb({err: sendResult.err})
                 return
               }
             }
+          } else {
+            const sendResult = send(request)
+            if (sendResult && sendResult.err) {
+              cb({err: sendResult.err})
+              return
+            }
           }
-          cb(err ? {put: ack, err: err} : {put: ack})
-          return
         }
+        cb(err ? {put: ack, err: err} : {put: ack})
+        return
       }
 
       if (err) console.log(err)
@@ -723,17 +727,6 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         if (Object.keys(update.now).length === 0) {
           if (cb) cb(null)
           return
-        }
-
-        // Ham.mix has already merged this locally-authored update into
-        // graph[soul], synchronously, before store.put below even starts
-        // persisting it - mark it as fully known now rather than waiting
-        // for a future disk fetch to do so, so a read landing in that
-        // window doesn't get forced through a disk round-trip that could
-        // itself race ahead of this same write and find nothing, even
-        // though the correct answer was already sitting in memory.
-        for (const soul of Object.keys(update.now)) {
-          hasNode.add(soul)
         }
 
         if (options.userLimit) {
