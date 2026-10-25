@@ -351,6 +351,53 @@ describe("wire", () => {
     )
   })
 
+  test("full-node get after writing one property of a stored node returns every property", async () => {
+    const put = (w: WireInterface, data: any) =>
+      new Promise(resolve => w.put(data, err => resolve(err)))
+    const get = (w: WireInterface, lex: any) =>
+      new Promise<any>(resolve => w.get(lex, resolve))
+
+    const first: WireInterface = Wire({
+      file: "test/partial-wire",
+      wss: new Server("ws://localhost:1241"),
+    })
+    const stored = {
+      partial_soul: {
+        _: {"#": "partial_soul", ">": {a: 1, b: 1}},
+        a: "on disk",
+        b: "also on disk",
+      },
+    }
+    assert.equal(await put(first, stored), null)
+
+    // A fresh instance on the same store starts with an empty graph, like a
+    // page load - writing one property mustn't make the rest unreachable.
+    const second: WireInterface = Wire({
+      file: "test/partial-wire",
+      wss: new Server("ws://localhost:1242"),
+    })
+    const update = {
+      partial_soul: {
+        _: {"#": "partial_soul", ">": {c: 2}},
+        c: "written now",
+      },
+    }
+    assert.equal(await put(second, update), null)
+
+    const msg = await get(second, {"#": "partial_soul"})
+    assert.deepEqual(msg, {
+      put: {
+        partial_soul: {
+          _: {"#": "partial_soul", ">": {a: 1, b: 1, c: 2}},
+          a: "on disk",
+          b: "also on disk",
+          c: "written now",
+        },
+      },
+    })
+    fs.rmSync("test/partial-wire", {recursive: true, force: true})
+  })
+
   test("offline PUT does not block subsequent GET", (t, done) => {
     offlineWire.put(
       {

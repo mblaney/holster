@@ -59,9 +59,10 @@ const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
     // return undefined to ensure we get all matching properties from store.
     if (!fast) return undefined
 
+    let found = false
     for (const key of Object.keys(graph[soul]!)) {
       // Always include userPublicKey for verification, regardless of filter
-      if (key === userPublicKey || match(lex["."], key)) {
+      if (key !== "_" && (key === userPublicKey || match(lex["."], key))) {
         node[key] = graph[soul]![key]!
         node._[">"][key] = graph[soul]!._[">"][key]!
         const state = graph[soul]!._[">"][key]!
@@ -69,8 +70,10 @@ const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
         if (sigs && sigs[state]) {
           signatures[state.toString()] = sigs[state]!
         }
+        found = true
       }
     }
+    if (!found) return undefined
   }
 
   if (Object.keys(signatures).length > 0) {
