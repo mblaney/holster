@@ -174,6 +174,42 @@ describe("holster.on nested", () => {
     assert.equal(events.length, countAfterOff)
   })
 
+  test("a child set to null isn't restored by an earlier update's read finishing last", async t => {
+    await new Promise<void>(resolve => {
+      serverUser
+        .get("shared")
+        .next("nested4")
+        .next("a")
+        .put({ct: "1"}, resolve as never)
+    })
+
+    const events: any[] = []
+    const cb = (data: unknown) => events.push(data)
+    serverUser.get("shared").next("nested4").on(cb, true, {nested: true})
+    t.after(() => serverUser.get("shared").next("nested4").off(cb))
+    await new Promise(r => setTimeout(r, 200))
+
+    await new Promise<void>(resolve => {
+      serverUser
+        .get("shared")
+        .next("nested4")
+        .next("b")
+        .put({ct: "1"}, resolve as never)
+    })
+    await new Promise<void>(resolve => {
+      serverUser
+        .get("shared")
+        .next("nested4")
+        .next("a")
+        .put(null, resolve as never)
+    })
+    await new Promise(r => setTimeout(r, 1000))
+
+    const last = events[events.length - 1]
+    assert.equal(last.a, null)
+    assert.equal(last.b.ct, "1")
+  })
+
   test("cleanup", (t, done) => {
     fs.rm(
       "test/holster.on.nested-server",

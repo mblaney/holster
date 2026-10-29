@@ -1020,6 +1020,9 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         // on() call's closure, so concurrent subscriptions (even on the
         // same key) each track their own independently.
         let listenedSoul = soul
+        // Each update starts its own async read, and an earlier one can finish
+        // last - only the newest is delivered, so stale data can't follow it.
+        let latestRun = 0
 
         map.set(callback, () => {
           // Bail out if off() has already cleaned up this context — the mapped
@@ -1031,6 +1034,12 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           // have an update and should not call callback twice.
           clearTimeout(retryTimer!)
           retryTimer = null
+          const run = ++latestRun
+          const deliver = (data: unknown) => {
+            if (run !== latestRun) return
+            retryTimer = null
+            callback(data)
+          }
 
           // Resolves {soul, item} to a genuine value, following a rel to its
           // target if the property turns out to be one - checked fresh on
@@ -1051,6 +1060,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
             node: Record<string, GraphValue> | null | undefined,
             value: unknown,
           ): void => {
+            if (run !== latestRun) return
             const id = utils.rel.is(value as GraphValue)
             if (id) {
               if (listenedSoul !== id) {
@@ -1063,21 +1073,16 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
                 )
                 listenedSoul = id
               }
-              readRelTarget(id, ctx ? ctx.user : null, opts).then(data => {
-                retryTimer = null
-                callback(data)
-              })
+              readRelTarget(id, ctx ? ctx.user : null, opts).then(deliver)
               return
             }
 
             if (value !== undefined && value !== null) {
-              retryTimer = null
-              callback(value)
+              deliver(value)
               return
             }
             if (retries >= maxRetries) {
-              retryTimer = null
-              callback(value !== undefined ? value : null)
+              deliver(value !== undefined ? value : null)
               return
             }
             // Fast once the parent node already exists (a value is likely

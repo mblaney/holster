@@ -769,6 +769,9 @@ const Holster = opt => {
         // same listener. Scoped to this one on() call's closure, so concurrent
         // subscriptions (even on the same key) can each track their own.
         let listenedSoul = soul
+        // Each update starts its own async read, and an earlier one can finish
+        // last - only the newest is delivered, so stale data can't follow it.
+        let latestRun = 0
 
         map.set(cb, () => {
           // Bail out if off() has already cleaned up this context. The mapped
@@ -781,6 +784,12 @@ const Holster = opt => {
           // have an update and should not call cb twice.
           clearTimeout(retryTimer)
           retryTimer = null
+          const run = ++latestRun
+          const deliver = data => {
+            if (run !== latestRun) return
+            retryTimer = null
+            cb(data)
+          }
 
           // Resolves {soul, item} to a genuine value, following a rel to its
           // target if the property turns out to be one. This is checked on
@@ -796,6 +805,7 @@ const Holster = opt => {
           // way the rel branch below already retries on a null target
           // read.
           const resolveValue = (retries, node, value) => {
+            if (run !== latestRun) return
             const id = utils.rel.is(value)
             if (id) {
               if (listenedSoul !== id) {
@@ -803,21 +813,16 @@ const Holster = opt => {
                 wire.on({"#": id, ".": null}, map.get(cb), false, _opt)
                 listenedSoul = id
               }
-              readRelTarget(id, ctx ? ctx.user : null, _opt).then(data => {
-                retryTimer = null
-                cb(data)
-              })
+              readRelTarget(id, ctx ? ctx.user : null, _opt).then(deliver)
               return
             }
 
             if (value !== undefined && value !== null) {
-              retryTimer = null
-              cb(value)
+              deliver(value)
               return
             }
             if (retries >= maxRetries) {
-              retryTimer = null
-              cb(value !== undefined ? value : null)
+              deliver(value !== undefined ? value : null)
               return
             }
             // Fast once the parent node already exists (a value is likely
