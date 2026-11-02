@@ -9,7 +9,7 @@ import SEA from "./sea.ts"
 import type {
   UserIdentity,
   HolsterOptions,
-  LexFilter,
+  LexWithDot,
   WireOptions,
 } from "./schemas.ts"
 import type {HolsterAPI, AwaitableHolsterAPI} from "./holster.ts"
@@ -45,7 +45,7 @@ export interface UserInterface {
   get?: {
     (
       keys: string | string[],
-      lex: LexFilter,
+      lex: LexWithDot,
       cb: (data: unknown) => void,
       _opt?: WireOptions,
     ): HolsterAPI
@@ -56,7 +56,12 @@ export interface UserInterface {
     ): HolsterAPI
     (
       keys: string | string[],
-      lex?: LexFilter,
+      lex: LexWithDot,
+      _opt?: WireOptions,
+    ): Promise<unknown>
+    (
+      keys: string | string[],
+      lex?: null,
       _opt?: WireOptions,
     ): AwaitableHolsterAPI
   }

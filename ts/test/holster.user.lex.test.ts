@@ -139,6 +139,16 @@ describe("holster.user.lex", () => {
     })
   })
 
+  test("user.get with lex and no callback can be awaited", async () => {
+    await user.get("awaited").put({key: "value", other: "skip"})
+
+    assert.deepEqual(await user.get("awaited", {".": "key"}), {key: "value"})
+    assert.deepEqual(
+      await user.get([user.is!.pub, "awaited"], {".": {"*": "o"}}),
+      {other: "skip"},
+    )
+  })
+
   test("cleanup", (t, done) => {
     fs.rm("test/holster.user.lex", {recursive: true, force: true}, err => {
       assert.equal(err, null)

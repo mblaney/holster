@@ -416,10 +416,10 @@ const Holster = opt => {
           return
         }
 
-        // lex requires a callback as it's not included in the chain below.
+        // lex isn't part of the chain below, so without a callback the
+        // result is returned as a promise instead.
         if (lex && typeof cb !== "function") {
-          console.log("error lex requires a callback function")
-          return
+          return new Promise(resolve => api(ctxid).get(key, lex, resolve, _opt))
         }
 
         // Top level keys are added to a root node so their values don't need
@@ -462,10 +462,12 @@ const Holster = opt => {
           return
         }
 
-        // lex requires a callback as it's not included in the chain below.
+        // lex isn't part of the chain below, so without a callback the
+        // result is returned as a promise instead.
         if (lex && typeof cb !== "function") {
-          console.log("error lex requires a callback function")
-          return
+          return new Promise(resolve =>
+            api(ctxid).next(key, lex, resolve, _opt),
+          )
         }
 
         const ctx = allctx.get(ctxid)
@@ -982,10 +984,10 @@ const Holster = opt => {
               return
             }
 
-            // lex requires a callback as it's not included in the chain below.
+            // lex isn't part of the chain below, so without a callback the
+            // result is returned as a promise instead.
             if (lex && !cb) {
-              console.log("error lex requires a callback function")
-              return
+              return new Promise(resolve => user.get(keys, lex, resolve, _opt))
             }
 
             ctxid = utils.text.random()

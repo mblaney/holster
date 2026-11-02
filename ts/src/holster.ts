@@ -37,11 +37,8 @@ export interface HolsterAPI {
       cb: (data: unknown) => void,
       _opt?: WireOptions,
     ): HolsterAPI
-    (
-      key: string | null,
-      lex?: LexWithDot,
-      _opt?: WireOptions,
-    ): AwaitableHolsterAPI
+    (key: string | null, lex: LexWithDot, _opt?: WireOptions): Promise<unknown>
+    (key: string | null, lex?: null, _opt?: WireOptions): AwaitableHolsterAPI
   }
   next: {
     (
@@ -55,11 +52,8 @@ export interface HolsterAPI {
       cb: (data: unknown) => void,
       _opt?: WireOptions,
     ): HolsterAPI
-    (
-      key: string | null,
-      lex?: LexWithDot,
-      _opt?: WireOptions,
-    ): AwaitableHolsterAPI
+    (key: string | null, lex: LexWithDot, _opt?: WireOptions): Promise<unknown>
+    (key: string | null, lex?: null, _opt?: WireOptions): AwaitableHolsterAPI
   }
   put: {
     (
@@ -601,9 +595,12 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           return this
         }
 
+        // lex isn't part of the chain below, so without a callback the
+        // result is returned as a promise instead.
         if (lexFilter && typeof callback !== "function") {
-          console.log("error lex requires a callback function")
-          return this
+          return new Promise(resolve =>
+            api(ctxid).get(key, lexFilter, resolve, opts),
+          ) as never
         }
 
         ctxid = utils.text.random()
@@ -662,9 +659,12 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           return this
         }
 
+        // lex isn't part of the chain below, so without a callback the
+        // result is returned as a promise instead.
         if (lexFilter && typeof callback !== "function") {
-          console.log("error lex requires a callback function")
-          return this
+          return new Promise(resolve =>
+            api(ctxid).next(key, lexFilter, resolve, opts),
+          ) as never
         }
 
         const ctx = allctx.get(ctxid)
@@ -1266,9 +1266,12 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               return this
             }
 
+            // lex isn't part of the chain below, so without a callback the
+            // result is returned as a promise instead.
             if (lexFilter && !callback) {
-              console.log("error lex requires a callback function")
-              return this
+              return new Promise(resolve =>
+                user.get!(keys, lexFilter, resolve, opts),
+              ) as never
             }
 
             ctxid = utils.text.random()
