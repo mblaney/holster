@@ -188,6 +188,18 @@ describe("holster.lex", () => {
     })
   })
 
+  test("get and next with lex and no callback can be awaited", async () => {
+    await holster
+      .get("awaited")
+      .put({key: "value", other: "skip", child: {name: "c"}})
+
+    assert.deepEqual(await holster.get("awaited", {".": "key"}), {key: "value"})
+    assert.deepEqual(
+      await holster.get("awaited").next("child", {".": {"*": "n"}}),
+      {name: "c"},
+    )
+  })
+
   test("cleanup", (t, done) => {
     fs.rm("test/holster.lex", {recursive: true, force: true}, err => {
       assert.equal(err, null)
