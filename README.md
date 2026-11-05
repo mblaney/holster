@@ -6,17 +6,17 @@ end-to-end encryption, conflict resolution and cross-platform compatibility.
 🔐 Built-in encryption and user authentication\
 📴 Local-first with offline support
 
-Holster stores data locally by default - IndexedDB in the browser, and the
-filesystem in Node.js, Deno or Bun - so reads and writes keep working without
-a network connection. Writes made while offline are queued and automatically
-sent once a connection to the network is available.
+Holster can store data locally - on the filesystem in Node.js, Deno or Bun,
+and in IndexedDB in the browser when the `indexedDB` option is set - so reads
+and writes keep working without a network connection. Writes made while
+offline are queued and automatically sent once a connection to the network is
+available.
 
 A build version of Holster is also provided in the npm package using
 [esbuild](https://esbuild.github.io), to run in production.
 
-Check out the [GitHub Wiki](https://github.com/mblaney/holster/wiki) for how
-to get started using the API, or visit
-[holster.haza.website](https://holster.haza.website) for examples.
+See [holster.haza.website](https://holster.haza.website) for the documentation
+and examples.
 
 ### Quick Start
 
@@ -49,7 +49,7 @@ Holster({port: 8765})
 
 That's all you need to run a server on port `8765`. You may also want to pass in
 memory and storage options with larger values than the defaults, which are
-conservative to support browser use. See [Holster options](https://github.com/mblaney/holster/wiki/Holster-API#holster-options) for more details. To run this
+conservative to support browser use. See [Running a relay](https://holster.haza.website/holster-options.html#running-a-relay) for more details. To run this
 with node:
 
 - `npm install @mblaney/holster`
