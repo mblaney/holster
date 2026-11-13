@@ -624,89 +624,80 @@ const Holster = opt => {
 
         // Otherwise put the data using the keys returned in result.
         // Need to check if a rel has already been added on the current node.
-        // Use attemptRead to retry if data hasn't propagated yet.
-        const attemptRead = (retries = 0) => {
-          wire.get(
-            {"#": soul, ".": item},
-            async msg => {
-              if (msg.err) {
-                _ack(`error getting ${soul}.${item}: ${msg.err}`)
-                return
-              }
+        // Concurrent puts creating the same rel share it (see createRel).
+        wire.get(
+          {"#": soul, ".": item},
+          async msg => {
+            if (msg.err) {
+              _ack(`error getting ${soul}.${item}: ${msg.err}`)
+              return
+            }
 
-              let node = msg.put && msg.put[soul]
-              const current = node && node[item]
+            let node = msg.put && msg.put[soul]
+            const current = node && node[item]
 
-              // If we didn't find the item but still have retries, retry
-              if (!current && retries < 5) {
-                await new Promise(r => setTimeout(r, 50))
-                return attemptRead(retries + 1)
-              }
-
-              const id = utils.rel.is(current)
-              if (!id) {
-                // The current rel doesn't exist, so add it first.
-                createRel(soul, item, node || {}, ctx.user, err => {
-                  if (err) {
-                    _ack(err)
-                    return
-                  }
-
-                  const _ctxid = utils.text.random()
-                  const chain = [{item: item, soul: soul}]
-                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
-                  // Pass on the previous ctx's own callback (if any)
-                  // positionally rather than pre-registering it via
-                  // allctx - otherwise it's invisible to put's own "no cb
-                  // given" check above, which would then wrap this retry
-                  // in a brand new promise competing with (and never
-                  // actually calling) the real one.
-                  api(_ctxid).put(data, ctx.cb)
-                })
-                return
-              }
-
-              const update = []
-              for (const key of result) {
-                const err = await new Promise(res => {
-                  if (utils.obj.is(data[key]) && !utils.rel.is(data[key])) {
-                    // Use the current rel as the context for nested objects.
-                    const _ctxid = utils.text.random()
-                    const chain = [{item: key, soul: id}]
-                    allctx.set(_ctxid, {chain: chain, user: ctx.user})
-                    api(_ctxid).put(data[key], res)
-                  } else {
-                    // Group the rest of the updates for put below.
-                    update.push(key)
-                    res(null)
-                  }
-                })
+            const id = utils.rel.is(current)
+            if (!id) {
+              // The current rel doesn't exist, so add it first.
+              createRel(soul, item, node || {}, ctx.user, err => {
                 if (err) {
-                  _ack(err, ctxid)
+                  _ack(err)
                   return
                 }
-              }
 
-              if (update.length === 0) {
-                _ack(null)
+                const _ctxid = utils.text.random()
+                const chain = [{item: item, soul: soul}]
+                allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                // Pass on the previous ctx's own callback (if any)
+                // positionally rather than pre-registering it via
+                // allctx - otherwise it's invisible to put's own "no cb
+                // given" check above, which would then wrap this retry
+                // in a brand new promise competing with (and never
+                // actually calling) the real one.
+                api(_ctxid).put(data, ctx.cb)
+              })
+              return
+            }
+
+            const update = []
+            for (const key of result) {
+              const err = await new Promise(res => {
+                if (utils.obj.is(data[key]) && !utils.rel.is(data[key])) {
+                  // Use the current rel as the context for nested objects.
+                  const _ctxid = utils.text.random()
+                  const chain = [{item: key, soul: id}]
+                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                  api(_ctxid).put(data[key], res)
+                } else {
+                  // Group the rest of the updates for put below.
+                  update.push(key)
+                  res(null)
+                }
+              })
+              if (err) {
+                _ack(err, ctxid)
                 return
               }
+            }
 
-              // Only write the primitive update keys. Rels created by the
-              // recursive puts above are already in the in-memory graph.
-              const updateNode = {}
-              update.forEach(key => {
-                updateNode[key] = data[key]
-              })
-              const g = await graph(id, updateNode, ctx.user, _ack)
-              if (g === null) return
+            if (update.length === 0) {
+              _ack(null)
+              return
+            }
 
-              wire.put(g, _ack)
-            },
-            {secure: !!(ctx.user || opt.secure), put: true},
-          )
-        }
-        attemptRead()
+            // Only write the primitive update keys. Rels created by the
+            // recursive puts above are already in the in-memory graph.
+            const updateNode = {}
+            update.forEach(key => {
+              updateNode[key] = data[key]
+            })
+            const g = await graph(id, updateNode, ctx.user, _ack)
+            if (g === null) return
+
+            wire.put(g, _ack)
+          },
+          {secure: !!(ctx.user || opt.secure), put: true},
+        )
       },
       on: (lex, cb, _get, _opt) => {
         if (typeof lex === "function") {
@@ -886,6 +877,8 @@ const Holster = opt => {
               console.log(`error getting ${soul}.${item}: ${msg.err}`)
               return
             }
+            // off() was called before this check finished.
+            if (!map.has(cb)) return
 
             const current = msg.put && msg.put[soul] && msg.put[soul][item]
             const id = utils.rel.is(current)

@@ -184,9 +184,29 @@ const Wire = opt => {
   const pendingReferences = new Set()
 
   // Debounce client-side wire update checks: skip if the same lex was checked
-  // recently. Keyed by "soul" or "soul.property".
+  // recently. Keyed by "soul" or "soul.property", and cleared on connect so
+  // updates missed while offline are always checked for.
   const recentChecks = new Map()
   const recentCheckTTL = 10000 // 10 seconds
+
+  // Whether a client should check peers for updates to data it has just
+  // answered locally. Other kinds of lex query are always checked.
+  const shouldCheck = lex => {
+    if (lex["."] && typeof lex["."] !== "string") return true
+
+    const key = lex["#"] + (lex["."] ? "." + lex["."] : "")
+    const now = Date.now()
+    const last = recentChecks.get(key)
+    if (last && now - last <= recentCheckTTL) return false
+
+    if (recentChecks.size > 1000) {
+      for (const [k, at] of recentChecks) {
+        if (now - at > recentCheckTTL) recentChecks.delete(k)
+      }
+    }
+    recentChecks.set(key, now)
+    return true
+  }
 
   // Track pending timeouts that should start when message is sent
   const pendingTimeouts = new Map()
@@ -505,29 +525,13 @@ const Wire = opt => {
       // hasNode above), and since its own reply re-enters put() and calls
       // check() again, this becomes a self-sustaining loop: a get every
       // ~recentCheckTTL, forever, per soul, for every soul ever fetched.
-      if (!isNode && !_opt.put) {
-        // Client: send request on the wire to check for updates,
-        // since it may have missed puts while disconnected.
-        // Skip if the same lex was checked recently to avoid flooding.
-        if (!lex["."] || typeof lex["."] === "string") {
-          const checkKey = lex["#"] + (lex["."] ? "." + lex["."] : "")
-          const now = Date.now()
-          const lastCheck = recentChecks.get(checkKey)
-          if (!lastCheck || now - lastCheck > recentCheckTTL) {
-            recentChecks.set(checkKey, now)
-            const sendResult = send(request)
-            if (sendResult && sendResult.err) {
-              cb({err: sendResult.err})
-              return
-            }
-          }
-        } else {
-          // Don't skip checks for other types of lex queries.
-          const sendResult = send(request)
-          if (sendResult && sendResult.err) {
-            cb({err: sendResult.err})
-            return
-          }
+      // Client: send request on the wire to check for updates, since it may
+      // have missed puts while disconnected.
+      if (!isNode && !_opt.put && shouldCheck(lex)) {
+        const sendResult = send(request)
+        if (sendResult && sendResult.err) {
+          cb({err: sendResult.err})
+          return
         }
       }
       cb({put: ack})
@@ -582,25 +586,11 @@ const Wire = opt => {
         Object.keys(node).some(key => key !== "_" && utils.match(lex["."], key))
       if (hasProperty) {
         // Public keys are immutable once written - never need a wire check.
-        if (!isNode && lex["."] !== utils.userPublicKey) {
-          if (!lex["."] || typeof lex["."] === "string") {
-            const checkKey = lex["#"] + (lex["."] ? "." + lex["."] : "")
-            const now = Date.now()
-            const lastCheck = recentChecks.get(checkKey)
-            if (!lastCheck || now - lastCheck > recentCheckTTL) {
-              recentChecks.set(checkKey, now)
-              const sendResult = send(request)
-              if (sendResult && sendResult.err) {
-                cb({err: sendResult.err})
-                return
-              }
-            }
-          } else {
-            const sendResult = send(request)
-            if (sendResult && sendResult.err) {
-              cb({err: sendResult.err})
-              return
-            }
+        if (!isNode && lex["."] !== utils.userPublicKey && shouldCheck(lex)) {
+          const sendResult = send(request)
+          if (sendResult && sendResult.err) {
+            cb({err: sendResult.err})
+            return
           }
         }
         cb(err ? {put: ack, err: err} : {put: ack})
@@ -782,6 +772,18 @@ const Wire = opt => {
       clients = () => wss.clients
     }
 
+    // Which client each message came from, so an answer to it goes back only
+    // to that client rather than to every connected client.
+    const origins = new Map()
+    const originTTL = 30000
+    const pruneOrigins = setInterval(() => {
+      const now = Date.now()
+      for (const [id, origin] of origins) {
+        if (now - origin.at > originTTL) origins.delete(id)
+      }
+    }, originTTL)
+    if (pruneOrigins.unref) pruneOrigins.unref()
+
     const send = (data, isBinary) => {
       // Start timeout for this message now that it's being sent
       const msg = JSON.parse(data)
@@ -807,7 +809,9 @@ const Wire = opt => {
         )
       }
 
-      clients().forEach(client => {
+      const origin = msg["@"] && origins.get(msg["@"])
+      const targets = origin ? [origin.ws] : clients()
+      targets.forEach(client => {
         if (client && client.readyState === WebSocket.OPEN) {
           client.send(data, {binary: isBinary})
         } else {
@@ -906,11 +910,13 @@ const Wire = opt => {
 
         const processMessage = async () => {
           dup.track(msg["#"])
+          if (msg["#"]) origins.set(msg["#"], {ws, at: Date.now()})
 
           if (msg.get) get(msg, send)
           if (msg.put) await put(msg, send)
-          send(data, isBinary)
 
+          // An answer to this relay's own request stops here, and anything
+          // else is passed on.
           const id = msg["@"]
           const cb = queue[id]
           if (cb) {
@@ -919,6 +925,8 @@ const Wire = opt => {
             cb(msg)
 
             delete queue[id]
+          } else {
+            send(data, isBinary)
           }
         }
 
@@ -966,69 +974,82 @@ const Wire = opt => {
     }, delay)
   }
 
-  const processQueue = () => {
-    if (messageQueue.length === 0) {
-      queueProcessor = null
-      return
-    }
+  // Messages go out straight away in bursts of up to burstSize, then at
+  // sendRate a second once a burst is used up, so a busy client doesn't
+  // overload the browser or reach the server's rate limit.
+  const burstSize = 100
+  const sendRate = 20
+  let tokens = burstSize
+  let tokensAt = Date.now()
 
+  const takeToken = () => {
     const now = Date.now()
-    if (clientThrottled && now < throttleUntil) {
-      // Still throttled, schedule next queue check
-      queueProcessor = setTimeout(
-        processQueue,
-        Math.min(1000, throttleUntil - now),
-      )
-      return
-    }
+    tokens = Math.min(burstSize, tokens + ((now - tokensAt) * sendRate) / 1000)
+    tokensAt = now
+    if (tokens < 1) return false
 
-    // Throttle period ended, resume processing
-    if (clientThrottled && now >= throttleUntil) {
-      console.log(`Throttle period ended, resuming queue processing`)
-      clientThrottled = false
-      throttleUntil = 0
-    }
+    tokens--
+    return true
+  }
 
-    // Process next message in queue
-    const data = messageQueue[0]
+  const scheduleQueue = delay => {
+    if (!queueProcessor) queueProcessor = setTimeout(processQueue, delay)
+  }
+
+  const isOnline = () =>
+    peers.some(peer => peer && peer.readyState === WebSocket.OPEN)
+
+  // Sends the message at the front of the queue, or sets it aside when
+  // offline.
+  const processMessage = () => {
+    const data = messageQueue.shift()
     const sent = sendToPeers(data)
-
     const msg = JSON.parse(data)
     const trackId = msg["#"]
 
-    // Drop GET messages with no pending callback — these were already served
-    // from local store so no caller is waiting for the wire response.
-    const isStaleCheckMessage =
-      !sent && msg.get && !pendingTimeouts.has(trackId)
+    // Hold offline PUTs separately so they don't block GET messages behind
+    // them. They'll be flushed back to the front of the queue on reconnect.
+    if (!sent && msg.put) offlinePuts.push(data)
 
-    if (sent || isStaleCheckMessage) {
-      messageQueue.shift()
-    } else if (!sent && msg.put) {
-      // Hold offline PUTs separately so they don't block GET messages behind
-      // them. They'll be flushed back to the front of the queue on reconnect.
-      messageQueue.shift()
-      offlinePuts.push(data)
-    }
+    // A GET with no pending callback was already served from the local
+    // store, so nothing is waiting for its response.
+    if (!trackId || !pendingTimeouts.has(trackId)) return
 
-    if (trackId && pendingTimeouts.has(trackId)) {
-      const lex = pendingTimeouts.get(trackId)
-      if (sent) {
-        if (offlineTimeouts.has(trackId)) {
-          clearTimeout(offlineTimeouts.get(trackId))
-          offlineTimeouts.delete(trackId)
-        }
-        startResponseTimeout(trackId, lex)
-      } else if (!offlineTimeouts.has(trackId)) {
-        offlineTimeouts.set(trackId, startResponseTimeout(trackId, lex, 0))
+    const lex = pendingTimeouts.get(trackId)
+    if (sent) {
+      if (offlineTimeouts.has(trackId)) {
+        clearTimeout(offlineTimeouts.get(trackId))
+        offlineTimeouts.delete(trackId)
       }
+      startResponseTimeout(trackId, lex)
+    } else if (!offlineTimeouts.has(trackId)) {
+      // Offline, so answer straight away that nothing was found.
+      offlineTimeouts.set(trackId, startResponseTimeout(trackId, lex, 0))
     }
+  }
 
-    // Schedule processing of next message if queue not empty
-    if (messageQueue.length > 0) {
-      // Add delay between messages to respect rate limit
-      queueProcessor = setTimeout(processQueue, 50)
-    } else {
-      queueProcessor = null
+  const processQueue = () => {
+    queueProcessor = null
+    while (messageQueue.length > 0) {
+      const now = Date.now()
+      if (clientThrottled && now < throttleUntil) {
+        scheduleQueue(Math.min(1000, throttleUntil - now))
+        return
+      }
+
+      if (clientThrottled) {
+        console.log(`Throttle period ended, resuming queue processing`)
+        clientThrottled = false
+        throttleUntil = 0
+      }
+
+      // Nothing goes out while offline, so there's nothing to pace.
+      if (isOnline() && !takeToken()) {
+        scheduleQueue(Math.ceil(((1 - tokens) * 1000) / sendRate))
+        return
+      }
+
+      processMessage()
     }
   }
 
@@ -1081,10 +1102,7 @@ const Wire = opt => {
     }
 
     messageQueue.push(data)
-    // Start queue processor if not already running
-    if (!queueProcessor) {
-      queueProcessor = setTimeout(processQueue, 50)
-    }
+    scheduleQueue(0)
   }
   if (!(opt.peers instanceof Array) || opt.peers.length === 0) {
     opt.peers = [`ws://localhost:${opt.port || 8765}`]
@@ -1111,12 +1129,11 @@ const Wire = opt => {
 
       ws.onopen = () => {
         retryHandler.reset()
+        recentChecks.clear()
         if (offlinePuts.length > 0) {
           messageQueue = offlinePuts.concat(messageQueue)
           offlinePuts = []
-          if (!queueProcessor) {
-            queueProcessor = setTimeout(processQueue, 50)
-          }
+          scheduleQueue(0)
         }
       }
 
