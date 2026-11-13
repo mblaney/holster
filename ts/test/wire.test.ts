@@ -451,6 +451,100 @@ describe("wire", () => {
     }, 50)
   })
 
+  test("offline GET for a missing soul answers straight away", (t, done) => {
+    const start = Date.now()
+    offlineWire.get({"#": "offline_missing_soul"}, msg => {
+      assert.deepEqual(msg, {put: {offline_missing_soul: null}})
+      assert.ok(Date.now() - start < 40, "answered without queueing")
+      done()
+    })
+  })
+
+  test("a burst is sent straight away, then paced", (t, done) => {
+    const wss6: Server = new Server("ws://localhost:1250")
+    const burstWire: WireInterface = Wire({
+      file: "test/burst-wire",
+      peers: ["ws://localhost:1250"],
+    })
+    let received = 0
+    wss6.on("connection", (socket: any) => {
+      socket.on("message", () => received++)
+    })
+
+    // Wait for the connection before sending.
+    setTimeout(() => {
+      for (let i = 0; i < 105; i++) {
+        burstWire.get({"#": `burst_soul_${i}`}, () => {})
+      }
+      setTimeout(() => {
+        assert.equal(received, 100, "the first 100 go out at once")
+        setTimeout(() => {
+          assert.equal(received, 105, "the rest follow at 20 a second")
+          wss6.stop()
+          fs.rmSync("test/burst-wire", {recursive: true, force: true})
+          done()
+        }, 400)
+      }, 30)
+    }, 50)
+  })
+
+  test("an answer goes only to the client that asked", (t, done) => {
+    const wss7: Server = new Server("ws://localhost:1251")
+    const routeWire: WireInterface = Wire({file: "test/route-wire", wss: wss7})
+    const asker = new WebSocket("ws://localhost:1251")
+    const other = new WebSocket("ws://localhost:1251")
+    const askerMessages: any[] = []
+    const otherMessages: any[] = []
+    asker.onmessage = m => askerMessages.push(JSON.parse(m.data))
+    other.onmessage = m => otherMessages.push(JSON.parse(m.data))
+
+    let open = 0
+    const start = () => {
+      if (++open < 2) return
+
+      routeWire.put(
+        {route_soul: {_: {"#": "route_soul", ">": {x: 1}}, x: "stored"}},
+        err => {
+          assert.equal(err, null)
+          asker.send(
+            JSON.stringify({"#": "route_get", get: {"#": "route_soul"}}),
+          )
+          asker.send(
+            JSON.stringify({
+              "#": "route_put",
+              put: {
+                route_soul: {_: {"#": "route_soul", ">": {y: 2}}, y: "new"},
+              },
+            }),
+          )
+          setTimeout(check, 100)
+        },
+      )
+    }
+    asker.onopen = start
+    other.onopen = start
+
+    const check = () => {
+      const answer = askerMessages.find(msg => msg["@"] === "route_get")
+      assert.equal(answer?.put?.route_soul?.x, "stored")
+      assert.ok(
+        !otherMessages.some(msg => msg["@"] === "route_get"),
+        "the answer isn't sent to other clients",
+      )
+      assert.ok(
+        otherMessages.some(msg => msg["#"] === "route_get"),
+        "the read is still passed on",
+      )
+      assert.ok(
+        otherMessages.some(msg => msg["#"] === "route_put"),
+        "a write still reaches every client",
+      )
+      wss7.stop()
+      fs.rmSync("test/route-wire", {recursive: true, force: true})
+      done()
+    }
+  })
+
   test("cleanup", (t, done) => {
     // Timeout to let extra wire sends finish before tests end.
     setTimeout(() => {

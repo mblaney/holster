@@ -841,103 +841,94 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           return
         }
 
-        const attemptRead = (retries = 0): void => {
-          wire.get(
-            {"#": soul, ".": item!},
-            async msg => {
-              if (msg.err) {
-                _ack(`error getting ${soul}.${item}: ${msg.err}`)
-                return
-              }
+        // Concurrent puts creating the same rel share it (see createRel).
+        wire.get(
+          {"#": soul, ".": item!},
+          async msg => {
+            if (msg.err) {
+              _ack(`error getting ${soul}.${item}: ${msg.err}`)
+              return
+            }
 
-              let node = msg.put && msg.put[soul]
-              const current = node && node[item!]
+            let node = msg.put && msg.put[soul]
+            const current = node && node[item!]
 
-              if (!current && retries < 5) {
-                await new Promise(r => setTimeout(r, 50))
-                return attemptRead(retries + 1)
-              }
-
-              const id = utils.rel.is(current as GraphValue)
-              if (!id) {
-                if (!node) node = {} as never
-                createRel(soul, item!, node as never, ctx.user, err => {
-                  if (err) {
-                    _ack(err)
-                    return
-                  }
-
-                  const _ctxid = utils.text.random()
-                  const chain: ChainItem[] = [{item: item!, soul: soul}]
-                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
-                  // Pass on the previous ctx's own callback (if any)
-                  // positionally rather than pre-registering it via
-                  // allctx - otherwise it's invisible to put's own "no cb
-                  // given" check above, which would then wrap this retry
-                  // in a brand new promise competing with (and never
-                  // actually calling) the real one.
-                  api(_ctxid).put(data, ctx.cb as never)
-                })
-                return
-              }
-
-              const update: string[] = []
-              for (const key of result as string[]) {
-                const err = await new Promise<string | null | undefined>(
-                  res => {
-                    if (
-                      utils.obj.is((data as Record<string, unknown>)[key]) &&
-                      !utils.rel.is((data as Record<string, GraphValue>)[key])
-                    ) {
-                      const _ctxid = utils.text.random()
-                      const chain: ChainItem[] = [{item: key, soul: id}]
-                      allctx.set(_ctxid, {chain: chain, user: ctx.user})
-                      api(_ctxid).put(
-                        (data as Record<string, GraphValue>)[key]!,
-                        res as never,
-                      )
-                    } else {
-                      update.push(key)
-                      res(null)
-                    }
-                  },
-                )
+            const id = utils.rel.is(current as GraphValue)
+            if (!id) {
+              if (!node) node = {} as never
+              createRel(soul, item!, node as never, ctx.user, err => {
                 if (err) {
                   _ack(err)
                   return
                 }
-              }
 
-              if (update.length === 0) {
-                _ack(null)
+                const _ctxid = utils.text.random()
+                const chain: ChainItem[] = [{item: item!, soul: soul}]
+                allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                // Pass on the previous ctx's own callback (if any)
+                // positionally rather than pre-registering it via
+                // allctx - otherwise it's invisible to put's own "no cb
+                // given" check above, which would then wrap this retry
+                // in a brand new promise competing with (and never
+                // actually calling) the real one.
+                api(_ctxid).put(data, ctx.cb as never)
+              })
+              return
+            }
+
+            const update: string[] = []
+            for (const key of result as string[]) {
+              const err = await new Promise<string | null | undefined>(res => {
+                if (
+                  utils.obj.is((data as Record<string, unknown>)[key]) &&
+                  !utils.rel.is((data as Record<string, GraphValue>)[key])
+                ) {
+                  const _ctxid = utils.text.random()
+                  const chain: ChainItem[] = [{item: key, soul: id}]
+                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                  api(_ctxid).put(
+                    (data as Record<string, GraphValue>)[key]!,
+                    res as never,
+                  )
+                } else {
+                  update.push(key)
+                  res(null)
+                }
+              })
+              if (err) {
+                _ack(err)
                 return
               }
+            }
 
-              // Only write the primitive update keys. Rels created by the
-              // recursive puts above are already in the in-memory graph.
-              const updateNode: Record<string, GraphValue> = {}
-              update.forEach(key => {
-                updateNode[key] = (data as Record<string, GraphValue>)[key]!
-              })
-              const g = await graph(
-                id,
-                updateNode as never,
-                ctx.user,
-                _ack as never,
-              )
-              if (g === null) return
+            if (update.length === 0) {
+              _ack(null)
+              return
+            }
 
-              wire.put(g, _ack as never)
-            },
-            {
-              secure:
-                (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) ||
-                options.secure,
-              put: true,
-            },
-          )
-        }
-        attemptRead()
+            // Only write the primitive update keys. Rels created by the
+            // recursive puts above are already in the in-memory graph.
+            const updateNode: Record<string, GraphValue> = {}
+            update.forEach(key => {
+              updateNode[key] = (data as Record<string, GraphValue>)[key]!
+            })
+            const g = await graph(
+              id,
+              updateNode as never,
+              ctx.user,
+              _ack as never,
+            )
+            if (g === null) return
+
+            wire.put(g, _ack as never)
+          },
+          {
+            secure:
+              (typeof ctx.user === "boolean" ? ctx.user : !!ctx.user) ||
+              options.secure,
+            put: true,
+          },
+        )
       } as HolsterAPI["put"],
 
       on: function (
@@ -1148,6 +1139,8 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               console.log(`error getting ${soul}.${item}: ${msg.err}`)
               return
             }
+            // off() was called before this check finished.
+            if (!map.has(callback)) return
 
             const current = msg.put && msg.put[soul] && msg.put[soul]![item!]
             const id = utils.rel.is(current as GraphValue)
