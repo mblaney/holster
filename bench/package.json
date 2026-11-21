@@ -1,0 +1,9 @@
+{
+  "name": "holster-bench",
+  "private": true,
+  "type": "module",
+  "description": "Measures how fast holster writes data to disk, alongside Gun.",
+  "dependencies": {
+    "gun": "0.2020.1241"
+  }
+}

@@ -42,6 +42,7 @@ Ham.mix = async (
   secure,
   listen,
   maxGraphSize = MAX_GRAPH_SIZE,
+  legacy = true,
 ) => {
   if (!change || typeof change !== "object") {
     throw new TypeError("change must be an object")
@@ -54,12 +55,16 @@ Ham.mix = async (
   }
 
   const machine = Date.now()
-  const now = {}
-  const defer = {}
+  // Keyed by soul, so these have no prototype (see utils.obj.own).
+  const now = Object.create(null)
+  const defer = Object.create(null)
   const listeners = [] // Collect listeners to fire after store.put
   const validProperties = new Map() // Track valid properties per soul
-  const validTimestamps = new Map() // Track valid timestamps per soul
+  // Properties in the graph that are only signed the way they were before
+  // property signatures, by soul, so their owner can sign them again.
+  const legacyKeys = Object.create(null)
   let wait = 0
+  let added = 0 // Souls added to the graph by this call
 
   for (const soul of Object.keys(change)) {
     const node = change[soul]
@@ -68,11 +73,13 @@ Ham.mix = async (
     let nodeWait = 0
     let verify = secure
 
-    if (!node || !node._) continue
+    // __proto__ can't be stored as a soul or key in a plain object.
+    if (soul === "__proto__" || !node || !node._) continue
 
     const pub = node[utils.userPublicKey]
-    // If timestamp signatures and public key are provided then always verify
-    if (node._["s"] && pub) verify = true
+    // An update that claims a public key is always verified, so one without
+    // signatures has nothing verified and is dropped.
+    if (pub) verify = true
 
     // Special case if soul starts with "~". Node must be system data ie,
     // ~@alias or ~publickey. For aliases, key and value must be a self
@@ -92,66 +99,30 @@ Ham.mix = async (
       }
     }
     if (verify) {
-      // Signature verification: check node._["s"] which can contain:
-      // 1. Per-property signatures (legacy): keys are property names
-      // 2. Timestamp signatures (new): keys are numeric timestamps
-      if (!pub || !node._) {
-        continue
-      }
+      if (!pub) continue
 
-      const signedTimestamps = new Set()
-      const signedProperties = new Set()
+      // Each property needs its own signature in _.s (see SEA.signProperties).
+      // One with a state older than the graph's would be ignored anyway, so it
+      // isn't checked.
+      const current = utils.obj.own(graph, soul)
+      const keys = Object.keys(node).filter(key => {
+        if (key === "_") return false
 
-      // Skip verification of timestamps that are older than what's in the graph
-      // to prevent old signatures from distributed messages causing conflicts
-      const incomingTimestamps = Object.entries(node._[">"] || {})
+        const sig = utils.obj.own(node._.s, key)
+        const state = utils.obj.own(node._[">"], key)
+        if (!sig || typeof state !== "number") return false
 
-      for (const [key, sig] of Object.entries(node._["s"] || {})) {
-        const asNumber = Number(key)
-        if (!isNaN(asNumber) && asNumber > 0) {
-          // Skip verification only if ALL properties for this timestamp are
-          // already newer in the graph. Using some() would incorrectly skip
-          // valid updates when only one property in a batch is outdated.
-          const propsForTimestamp = incomingTimestamps.filter(
-            ([, ts]) => Number(ts) === asNumber,
-          )
-          const allNewerInGraph =
-            propsForTimestamp.length > 0 &&
-            propsForTimestamp.every(([prop]) => {
-              const graphState =
-                graph[soul] && graph[soul]._[">"] ? graph[soul]._[">"][prop] : 0
-              return graphState > asNumber
-            })
+        const currentState = utils.obj.own(current && current._[">"], key)
+        return !(currentState > state)
+      })
+      const signed = await SEA.verifyProperties(soul, node, keys, pub, legacy)
+      if (signed.size === 0) continue
 
-          if (allNewerInGraph) {
-            continue
-          }
-
-          const isValid = await SEA.verifyTimestamp(asNumber, sig, pub)
-          if (isValid) {
-            signedTimestamps.add(asNumber)
-            // Add all properties with this timestamp to signed set
-            for (const [prop, ts] of incomingTimestamps) {
-              if (Number(ts) === asNumber) {
-                signedProperties.add(prop)
-              }
-            }
-          }
-        }
-      }
-
-      // If no properties verified, skip this update
-      if (signedProperties.size === 0) {
-        continue
-      }
-
-      // Track signed properties and timestamps for this soul
-      validProperties.set(soul, signedProperties)
-      validTimestamps.set(soul, signedTimestamps)
+      validProperties.set(soul, signed)
     }
 
     for (const key of Object.keys(node)) {
-      if (key === "_") continue
+      if (key === "_" || key === "__proto__") continue
 
       // Properties without signatures in this update are left unchanged
       if (validProperties.has(soul) && !validProperties.get(soul).has(key)) {
@@ -159,9 +130,10 @@ Ham.mix = async (
       }
 
       const value = node[key]
-      const state = node._ && node._[">"] ? node._[">"][key] : 0
-      const currentValue = (graph[soul] || {})[key]
-      const currentState = (graph[soul] || {_: {">": {}}})._[">"][key] || 0
+      const state = node._ && node._[">"] ? utils.obj.own(node._[">"], key) : 0
+      const current = utils.obj.own(graph, soul)
+      const currentValue = utils.obj.own(current, key)
+      const currentState = utils.obj.own(current && current._[">"], key) || 0
 
       if (alias && key !== utils.rel.is(value)) {
         console.log(`error alias ${alias}: ${key} !== ${utils.rel.is(value)}`)
@@ -176,35 +148,43 @@ Ham.mix = async (
 
         // Wait the shortest difference before trying the updates again.
         if (wait === 0 || skew < wait) wait = nodeWait = skew
+        const sig = utils.obj.own(node._.s, key)
         if (!defer[soul]) {
           defer[soul] = {_: {"#": soul, ">": {}, s: {}}}
         }
         defer[soul][key] = value
         defer[soul]._[">"][key] = state
-        if (node._["s"] && node._["s"][state]) {
-          defer[soul]._["s"][state] = node._["s"][state]
-        }
+        if (sig) defer[soul]._.s[key] = sig
       } else {
-        // Check if this property has a signed timestamp
         const isSigned =
-          validTimestamps.has(soul) && validTimestamps.get(soul).has(state)
+          validProperties.has(soul) && validProperties.get(soul).has(key)
         const result = Ham(state, currentState, value, currentValue, isSigned)
+        if (
+          (result.incoming || result.state) &&
+          isSigned &&
+          validProperties.get(soul).get(key)
+        ) {
+          if (!legacyKeys[soul]) legacyKeys[soul] = []
+          legacyKeys[soul].push(key)
+        }
         if (result.incoming) {
           if (!now[soul]) {
             now[soul] = {_: {"#": soul, ">": {}, s: {}}}
           }
-          if (!graph[soul]) {
+          if (!current) {
             graph[soul] = {_: {"#": soul, ">": {}, s: {}}}
+            added++
           }
           graph[soul][key] = now[soul][key] = value
           graph[soul]._[">"][key] = now[soul]._[">"][key] = state
-          if (node._["s"] && node._["s"][state]) {
-            graph[soul]._["s"][state] = now[soul]._["s"][state] =
-              node._["s"][state]
+          const sig = utils.obj.own(node._.s, key)
+          if (sig) {
+            if (!graph[soul]._.s) graph[soul]._.s = {}
+            graph[soul]._.s[key] = now[soul]._.s[key] = sig
           }
           // Collect event listeners to fire after store.put completes.
           // This ensures listeners always fire with data that's been stored.
-          if (listen[soul]) {
+          if (utils.obj.own(listen, soul)) {
             listen[soul]
               .filter(l => utils.match(l["."], key))
               .forEach(l => listeners.push(l.cb))
@@ -215,31 +195,58 @@ Ham.mix = async (
     }
 
     // Collect event listeners for update on soul.
-    if (updated && listen[soul]) {
+    if (updated && utils.obj.own(listen, soul)) {
       listen[soul]
         .filter(l => utils.match(l["."]))
         .forEach(l => listeners.push(l.cb))
     }
   }
 
-  const souls = Object.keys(graph)
-  if (souls.length > maxGraphSize) {
-    // Sort by oldest state timestamp and remove oldest entries
-    const soulsByAge = souls
-      .map(soul => {
-        const states = graph[soul]._ && graph[soul]._[">"]
-        const maxState = states ? Math.max(...Object.values(states)) : 0
-        return {soul, maxState}
-      })
-      .sort((a, b) => a.maxState - b.maxState)
-    const remove = soulsByAge.slice(0, souls.length - maxGraphSize)
-    remove.forEach(({soul}) => {
-      delete graph[soul]
-      if (hasNode) hasNode.delete(soul)
-    })
+  limitGraph(graph, hasNode, maxGraphSize, added)
+  return {now, defer, wait, listeners, legacy: legacyKeys}
+}
+
+// Counting every soul in the graph on every call was most of the time a
+// write took, so each graph's size is remembered from its last count, plus
+// the souls Ham.mix has added since.
+const graphSizes = new WeakMap()
+// wire.js also adds souls it reads from the store, which aren't counted
+// above, so the graph is counted again after this many calls regardless.
+const RECOUNT_CALLS = 1000
+
+// Removes the graph's oldest souls once it's over maxGraphSize, down to 90%
+// of it, so the souls are only sorted every few hundred new ones rather
+// than on every write.
+function limitGraph(graph, hasNode, maxGraphSize, added) {
+  const known = graphSizes.get(graph) ?? {size: 0, added: 0, calls: 0}
+  graphSizes.set(graph, known)
+  known.added += added
+  known.calls++
+  if (known.size + known.added <= maxGraphSize && known.calls < RECOUNT_CALLS) {
+    return
   }
 
-  return {now: now, defer: defer, wait: wait, listeners: listeners}
+  const souls = Object.keys(graph)
+  known.size = souls.length
+  known.added = 0
+  known.calls = 0
+  if (souls.length <= maxGraphSize) return
+
+  // Sort by oldest state timestamp and remove oldest entries
+  const soulsByAge = souls
+    .map(soul => {
+      const states = graph[soul]._ && graph[soul]._[">"]
+      const maxState = states ? Math.max(...Object.values(states)) : 0
+      return {soul, maxState}
+    })
+    .sort((a, b) => a.maxState - b.maxState)
+  const keep = Math.floor(maxGraphSize * 0.9)
+  const remove = soulsByAge.slice(0, souls.length - keep)
+  remove.forEach(({soul}) => {
+    delete graph[soul]
+    if (hasNode) hasNode.delete(soul)
+  })
+  known.size = keep
 }
 
 export default Ham

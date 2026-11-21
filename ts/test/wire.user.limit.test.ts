@@ -2,6 +2,7 @@ import fs from "fs"
 import {Server} from "mock-socket"
 import {describe, test} from "node:test"
 import assert from "node:assert/strict"
+import SEA from "../src/sea.ts"
 import Store from "../src/store.ts"
 import Wire from "../src/wire.ts"
 
@@ -29,8 +30,6 @@ describe("wire.user.limit", () => {
     userLimit: true,
     defaultLimit: 0.0001,
   })
-
-  const pubKey = "_holster_user_public_key"
 
   // Send a put message to the server via WebSocket and wait for the ack.
   // Waits for the connection to be open if not already established.
@@ -100,77 +99,45 @@ describe("wire.user.limit", () => {
     })
   })
 
-  test("user data blocked when defaultLimit:0", (t, done) => {
+  test("user data blocked when defaultLimit:0", async () => {
     const soul = "ul_user_zero"
-    const ts = Date.now()
-    sendPut(client1, {
-      [soul]: {
-        _: {"#": soul, ">": {[pubKey]: ts, x: ts}},
-        [pubKey]: "testPub",
-        x: "user data",
-      },
-    }).then(ack => {
-      assert.equal(ack.err, null)
-      readFromDisk("test/user-limit-zero", soul).then(node => {
-        assert.equal(
-          node,
-          null,
-          "user node should not be stored when limit is 0",
-        )
-        done()
-      })
-    })
+    const pair = await SEA.pair()
+    const data = await SEA.signProperties(soul, {x: "user data"}, pair)
+    const ack = await sendPut(client1, data)
+    assert.equal(ack.err, null)
+    const node = await readFromDisk("test/user-limit-zero", soul)
+    assert.equal(node, null, "user node should not be stored when limit is 0")
   })
 
-  test("user data within limit is stored", (t, done) => {
+  test("user data within limit is stored", async () => {
     const soul = "ul_user_allow"
-    const ts = Date.now()
-    sendPut(client2, {
-      [soul]: {
-        _: {"#": soul, ">": {[pubKey]: ts, x: ts}},
-        [pubKey]: "allowPub",
-        x: "user data",
-      },
-    }).then(ack => {
-      assert.equal(ack.err, null)
-      readFromDisk("test/user-limit-allow", soul).then(node => {
-        assert.ok(node, "user node should be stored when within limit")
-        assert.equal((node as {x?: string}).x, "user data")
-        done()
-      })
-    })
+    const pair = await SEA.pair()
+    const data = await SEA.signProperties(soul, {x: "user data"}, pair)
+    const ack = await sendPut(client2, data)
+    assert.equal(ack.err, null)
+    const node = await readFromDisk("test/user-limit-allow", soul)
+    assert.ok(node, "user node should be stored when within limit")
+    assert.equal((node as {x?: string}).x, "user data")
   })
 
-  test("a write that shrinks usage is stored even when already over the limit", (t, done) => {
+  test("a write that shrinks usage is stored even when already over the limit", async () => {
     const soul = "ul_shrink"
-    const ts1 = Date.now()
-    sendPut(client3, {
-      [soul]: {
-        _: {"#": soul, ">": {[pubKey]: ts1, x: ts1}},
-        [pubKey]: "shrinkPub",
-        x: "a long enough string to push comfortably past the tiny limit",
-      },
-    }).then(ack1 => {
-      assert.equal(ack1.err, null)
-      const ts2 = ts1 + 1
-      sendPut(client3, {
-        [soul]: {
-          _: {"#": soul, ">": {[pubKey]: ts2, x: ts2}},
-          [pubKey]: "shrinkPub",
-          x: null,
-        },
-      }).then(ack2 => {
-        assert.equal(ack2.err, null)
-        readFromDisk("test/user-limit-shrink", soul).then(node => {
-          assert.equal(
-            (node as {x?: string | null}).x,
-            null,
-            "a shrinking write should still be stored once already over the limit",
-          )
-          done()
-        })
-      })
-    })
+    const pair = await SEA.pair()
+    const long = "a long enough string to push comfortably past the tiny limit"
+    const first = await SEA.signProperties(soul, {x: long}, pair)
+    const ack1 = await sendPut(client3, first)
+    assert.equal(ack1.err, null)
+    // The second write needs a later state than the first.
+    await new Promise(res => setTimeout(res, 2))
+    const second = await SEA.signProperties(soul, {x: null}, pair)
+    const ack2 = await sendPut(client3, second)
+    assert.equal(ack2.err, null)
+    const node = await readFromDisk("test/user-limit-shrink", soul)
+    assert.equal(
+      (node as {x?: string | null}).x,
+      null,
+      "a shrinking write should still be stored once already over the limit",
+    )
   })
 
   test("cleanup", (_t, done) => {

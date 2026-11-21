@@ -288,4 +288,8 @@ describe("SEA", () => {
       done()
     })()
   })
+
+  test("verifyTimestamp with an invalid public key", async () => {
+    assert.equal(await SEA.verifyTimestamp(1, "AAAA", "not a key"), false)
+  })
 })

@@ -1,6 +1,7 @@
 import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Radisk from "../src/radisk.js"
+import Radix from "../src/radix.js"
 
 // ASCII character for enquiry.
 const enq = String.fromCharCode(5)
@@ -100,5 +101,81 @@ describe("split file with shared prefix", () => {
       )
       done()
     }, 10)
+  })
+})
+
+// Souls such as item0 to item199 share a long prefix, so each one starts
+// deep in the radix tree. Splits used to depend on that depth, so these
+// never split and the file grew without limit.
+describe("split souls that share a long prefix", () => {
+  const memoryStore = puts => ({
+    get: (file, cb) => cb(null, puts[file]),
+    put: (file, data, cb) => {
+      puts[file] = data
+      cb(null)
+    },
+    list: cb => {
+      Object.keys(puts).sort().forEach(cb)
+      cb(null)
+    },
+  })
+  const write = (radisk, key, value) =>
+    new Promise(resolve => radisk(key, value, resolve))
+  const read = (radisk, key) =>
+    new Promise(resolve => radisk(key, (err, value) => resolve(value)))
+  const props = ["title", "body", "n"]
+
+  test("splits into files, keeping each soul's properties together", async () => {
+    const puts = {}
+    const radisk = Radisk({size: 2000, cache: false, store: memoryStore(puts)})
+    const writes = []
+    for (let i = 0; i < 200; i++) {
+      for (const prop of props) {
+        writes.push(write(radisk, `item${i}${enq}${prop}`, [`${prop} ${i}`, 1]))
+      }
+    }
+    await Promise.all(writes)
+
+    const files = Object.keys(puts)
+    assert.ok(files.length > 5, `wrote ${files.length} files`)
+    for (const file of files) {
+      assert.ok(puts[file].length <= 2000, `${file} is ${puts[file].length}`)
+    }
+    // A soul's properties are never in two files. Files store keys as shared
+    // prefixes, so each one is parsed to find the souls it holds.
+    const fileOf = new Map()
+    for (const file of files) {
+      const disk = await new Promise(resolve =>
+        radisk.parse(file, (err, disk) => resolve(disk)),
+      )
+      Radix.map(disk, (value, key) => {
+        const soul = key.split(enq)[0]
+        const owner = fileOf.get(soul)
+        assert.ok(!owner || owner === file, `${soul} is in two files`)
+        fileOf.set(soul, file)
+      })
+    }
+    assert.equal(fileOf.size, 200)
+    for (let i = 0; i < 200; i++) {
+      for (const prop of props) {
+        assert.deepEqual(await read(radisk, `item${i}${enq}${prop}`), [
+          `${prop} ${i}`,
+          1,
+        ])
+      }
+    }
+  })
+
+  test("keeps one soul with many properties in one file", async () => {
+    const puts = {}
+    const radisk = Radisk({size: 2000, cache: false, store: memoryStore(puts)})
+    const writes = []
+    for (let i = 0; i < 200; i++) {
+      writes.push(write(radisk, `item${enq}p${i}`, [`value ${i}`, 1]))
+    }
+    await Promise.all(writes)
+
+    assert.deepEqual(Object.keys(puts), ["!"])
+    assert.deepEqual(await read(radisk, `item${enq}p199`), ["value 199", 1])
   })
 })

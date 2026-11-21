@@ -1,8 +1,10 @@
 import fs from "fs"
 import {Server} from "mock-socket"
-import {describe, test} from "node:test"
+import {after, describe, test} from "node:test"
 import assert from "node:assert/strict"
+import SEA from "../src/sea.js"
 import User from "../src/user.js"
+import Wire from "../src/wire.js"
 
 describe("user", () => {
   const wss = new Server("ws://localhost:1234")
@@ -169,5 +171,49 @@ describe("user", () => {
       assert.equal(err, null)
       done()
     })
+  })
+})
+
+describe("user auth iterations", () => {
+  const wss = new Server("ws://localhost:1270")
+  const wire = Wire({file: "test/user-iterations", wss: wss})
+  const user = User({}, wire)
+  let soul
+
+  // Reads the user's auth record.
+  const auth = () =>
+    new Promise(res =>
+      wire.get({"#": soul, ".": "auth"}, msg =>
+        res(JSON.parse(msg.put[soul].auth)),
+      ),
+    )
+
+  after(() => fs.rmSync("test/user-iterations", {recursive: true, force: true}))
+
+  test("create stores the iterations", async () => {
+    await new Promise(res => user.create("carol", "password", res))
+    await new Promise(res => user.auth("carol", "password", res))
+    soul = "~" + user.is.pub
+    assert.equal((await auth()).iter, 600000)
+  })
+
+  test("auth with fewer iterations encrypts again", async () => {
+    // An auth record from before iterations were stored.
+    const salt = "an old salt"
+    const work = await SEA.work("password", salt, 100000)
+    const priv = {priv: user.is.priv, epriv: user.is.epriv}
+    const enc = await SEA.encrypt(priv, work)
+    const update = {auth: JSON.stringify({enc: enc, salt: salt})}
+    const graph = await SEA.signProperties(soul, update, user.is)
+    await new Promise(res => wire.put(graph, res))
+    assert.equal((await auth()).iter, undefined)
+
+    user.leave()
+    const err = await new Promise(res => user.auth("carol", "password", res))
+    assert.equal(err, null)
+    assert.equal(user.is.priv, priv.priv)
+    const updated = await auth()
+    assert.equal(updated.iter, 600000)
+    assert.notEqual(updated.salt, salt)
   })
 })

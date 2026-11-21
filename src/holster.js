@@ -49,6 +49,10 @@ const Holster = opt => {
         if (key === "_") {
           return "error underscore cannot be used as a property name"
         }
+        // A plain object can't hold __proto__ as its own property.
+        if (key === "__proto__") {
+          return "error __proto__ cannot be used as a property name"
+        }
         if (utils.obj.is(value) || ok(value)) {
           keys.push(key)
           continue
@@ -133,12 +137,7 @@ const Holster = opt => {
     }
 
     const graph = async (soul, data, userctx, cb) => {
-      if (userctx) {
-        // Sign the timestamp
-        const timestamp = Date.now()
-        const sig = await SEA.signTimestamp(timestamp, userctx)
-        return utils.graph(soul, data, sig, userctx.pub, timestamp)
-      }
+      if (userctx) return SEA.signProperties(soul, data, userctx)
 
       if (opt.secure) {
         if (!cb) cb = console.log
@@ -155,9 +154,10 @@ const Holster = opt => {
       return data => {
         const ctx = allctx.get(ctxid)
         if (ctx && typeof ctx.cb !== "undefined") {
-          // Use a timeout so that the context can be removed before data is
-          // returned to the callback (allows nested get calls).
-          setTimeout(() => ctx.cb(data), 1)
+          // Queued so that the context can be removed before data is returned
+          // to the callback (allows nested get calls). A timeout used to add
+          // a millisecond to every call.
+          queueMicrotask(() => ctx.cb(data))
         } else if (data) {
           console.log("error no callback for data", data, "ctx", ctx)
         }
@@ -219,14 +219,17 @@ const Holster = opt => {
 
     // Creates a rel for item on soul, or reuses one already being created
     // by a concurrent caller for the same soul+item (see pendingRel above).
-    // Calls cb(err, id) with a ready-to-display err, already prefixed where
-    // needed - callers should pass it straight through, not wrap it again.
-    const createRel = (soul, item, node, user, cb) => {
+    // Optional values for the new node are written in the same graph as the
+    // rel, so both are saved together. Calls cb(err, id, stored) with a
+    // ready-to-display err, already prefixed where needed - callers should
+    // pass it straight through, not wrap it again. stored is false when a
+    // pending rel was reused, since values weren't written then.
+    const createRel = (soul, item, node, user, cb, values) => {
       let bySoul = pendingRel.get(soul)
       const pending = bySoul && bySoul.get(item)
       if (pending) {
         pending.then(
-          id => cb(null, id),
+          id => cb(null, id, false),
           err => cb(err),
         )
         return
@@ -255,24 +258,32 @@ const Holster = opt => {
         // fails (secure mode, no user) - pass cb straight through rather
         // than wrapping, so that message isn't prefixed a second time.
         const g = await graph(soul, node, user, cb)
-        if (g === null) {
+        const v = g && values && (await graph(id, values, user, cb))
+        if (g === null || v === null) {
           clear()
           fail(new Error("secure mode"))
           return
         }
 
-        wire.put(g, err => {
-          clear()
-          if (err) {
-            const message = `error putting ${item} on ${soul}: ${err}`
-            fail(message)
-            cb(message)
-            return
-          }
+        // id was just made up here, so wire doesn't need to check whether it's
+        // already stored.
+        const created = [id]
+        wire.put(
+          v ? Object.assign(g, v) : g,
+          err => {
+            clear()
+            if (err) {
+              const message = `error putting ${item} on ${soul}: ${err}`
+              fail(message)
+              cb(message)
+              return
+            }
 
-          settle(id)
-          cb(null, id)
-        })
+            settle(id)
+            cb(null, id, !!values)
+          },
+          created,
+        )
       })()
     }
 
@@ -410,7 +421,7 @@ const Holster = opt => {
           cb = lex
           lex = null
         }
-        if (key === null || key === "" || key === "_") {
+        if (key === null || key === "" || key === "_" || key === "__proto__") {
           console.log("error please provide a key")
           if (cb) cb(null)
           return
@@ -457,7 +468,7 @@ const Holster = opt => {
         }
 
         const _ack = ack(ctxid)
-        if (key === "" || key === "_") {
+        if (key === "" || key === "_" || key === "__proto__") {
           _ack(null)
           return
         }
@@ -638,24 +649,49 @@ const Holster = opt => {
 
             const id = utils.rel.is(current)
             if (!id) {
-              // The current rel doesn't exist, so add it first.
-              createRel(soul, item, node || {}, ctx.user, err => {
-                if (err) {
-                  _ack(err)
-                  return
+              // The current rel doesn't exist, so add it first, along with
+              // the data's values. Nested objects need rels of their own, so
+              // they're put afterwards.
+              const values = {}
+              const nested = {}
+              for (const key of result) {
+                if (utils.obj.is(data[key]) && !utils.rel.is(data[key])) {
+                  nested[key] = data[key]
+                } else {
+                  values[key] = data[key]
                 }
+              }
+              const hasValues = Object.keys(values).length !== 0
+              createRel(
+                soul,
+                item,
+                node || {},
+                ctx.user,
+                (err, _relId, stored) => {
+                  if (err) {
+                    _ack(err)
+                    return
+                  }
 
-                const _ctxid = utils.text.random()
-                const chain = [{item: item, soul: soul}]
-                allctx.set(_ctxid, {chain: chain, user: ctx.user})
-                // Pass on the previous ctx's own callback (if any)
-                // positionally rather than pre-registering it via
-                // allctx - otherwise it's invisible to put's own "no cb
-                // given" check above, which would then wrap this retry
-                // in a brand new promise competing with (and never
-                // actually calling) the real one.
-                api(_ctxid).put(data, ctx.cb)
-              })
+                  const rest = stored ? nested : data
+                  if (Object.keys(rest).length === 0) {
+                    _ack(null)
+                    return
+                  }
+
+                  const _ctxid = utils.text.random()
+                  const chain = [{item: item, soul: soul}]
+                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                  // Pass on the previous ctx's own callback (if any)
+                  // positionally rather than pre-registering it via
+                  // allctx - otherwise it's invisible to put's own "no cb
+                  // given" check above, which would then wrap this retry
+                  // in a brand new promise competing with (and never
+                  // actually calling) the real one.
+                  api(_ctxid).put(rest, ctx.cb)
+                },
+                hasValues ? values : undefined,
+              )
               return
             }
 
@@ -971,7 +1007,12 @@ const Holster = opt => {
               return
             }
 
-            if (key === null || key === "" || key === "_") {
+            if (
+              key === null ||
+              key === "" ||
+              key === "_" ||
+              key === "__proto__"
+            ) {
               console.log("error please provide a key")
               if (cb) cb(null)
               return

@@ -390,6 +390,19 @@ describe("holster.put", () => {
     )
   })
 
+  // A new key's values are written with its rel, but a put that reuses a rel
+  // another put is still creating has to write its own values afterwards.
+  test("concurrent puts to a new key keep both values", async () => {
+    await Promise.all([
+      holster.get("concurrent").put({a: "first"}),
+      holster.get("concurrent").put({b: "second"}),
+    ])
+    assert.deepEqual(await holster.get("concurrent"), {
+      a: "first",
+      b: "second",
+    })
+  })
+
   test("cleanup", (t, done) => {
     fs.rm("test/holster.put", {recursive: true, force: true}, err => {
       assert.equal(err, null)

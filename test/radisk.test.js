@@ -169,11 +169,16 @@ describe("radisk", () => {
     radisk("newFile", (err, value) => {
       assert.equal(value, big)
     })
+    // Rewriting the first file takes it over the file size, so it's split
+    // at keyB. A key without enq is its own soul, so splits can happen
+    // between keys that share a prefix.
     setTimeout(() => {
       assert.deepEqual(puts, {
         "!":
           '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
-          '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
+          '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n',
+        keyB:
+          '\x1F+0\x1F#\x1F"key\x1F\n' +
           '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
           '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"' + big + "\x1F\n",
@@ -196,7 +201,9 @@ describe("radisk", () => {
       assert.deepEqual(puts, {
         "!":
           '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
-          '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
+          '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n',
+        keyB:
+          '\x1F+0\x1F#\x1F"key\x1F\n' +
           '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
           '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"' + big + "\x1F\n",
@@ -218,7 +225,9 @@ describe("radisk", () => {
       assert.deepEqual(puts, {
         "!":
           '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
-          '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n' +
+          '\x1F+1\x1F#\x1F"A\x1F=\x1F"valueA\x1F\n',
+        keyB:
+          '\x1F+0\x1F#\x1F"key\x1F\n' +
           '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
           '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
@@ -228,9 +237,10 @@ describe("radisk", () => {
     }, 10)
   })
 
-  // This tests ignoring the maximum file size when writing sub-keys. Since
-  // radisk.write has already been called for a key it would previously get
-  // duplicated when trying to split due to reaching the max length.
+  // A big value for keyA takes the first file over the file size, so keyA
+  // is split off into a file of its own. Since radisk.write has already been
+  // called for a key it would previously get duplicated when trying to
+  // split due to reaching the max length.
   test("write big value to first file", (t, done) => {
     radisk("keyA", big)
     radisk("keyA", (err, value) => {
@@ -238,11 +248,10 @@ describe("radisk", () => {
     })
     setTimeout(() => {
       assert.deepEqual(puts, {
-        "!":
-          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
-          '\x1F+1\x1F#\x1F"A\x1F=\x1F"' +
-          big +
-          "\x1F\n" +
+        "!": '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n',
+        keyA: '\x1F+0\x1F#\x1F"keyA\x1F=\x1F"' + big + "\x1F\n",
+        keyB:
+          '\x1F+0\x1F#\x1F"key\x1F\n' +
           '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
           '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
@@ -259,11 +268,10 @@ describe("radisk", () => {
     })
     setTimeout(() => {
       assert.deepEqual(puts, {
-        "!":
-          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
-          '\x1F+1\x1F#\x1F"A\x1F=\x1F"' +
-          big +
-          "\x1F\n" +
+        "!": '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n',
+        keyA: '\x1F+0\x1F#\x1F"keyA\x1F=\x1F"' + big + "\x1F\n",
+        keyB:
+          '\x1F+0\x1F#\x1F"key\x1F\n' +
           '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
           '\x1F+1\x1F#\x1F"C\x1F=\x1F"valueC\x1F\n',
         newFile: '\x1F+0\x1F#\x1F"newFile\x1F=\x1F"removed...\x1F\n',
@@ -286,11 +294,10 @@ describe("radisk", () => {
     })
     setTimeout(() => {
       assert.deepEqual(puts, {
-        "!":
-          '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n' +
-          '\x1F+1\x1F#\x1F"A\x1F=\x1F"' +
-          big +
-          "\x1F\n" +
+        "!": '\x1F+0\x1F#\x1F"key\x1F=\x1F"value\ncontinued\x0312345\x1F\n',
+        keyA: '\x1F+0\x1F#\x1F"keyA\x1F=\x1F"' + big + "\x1F\n",
+        keyB:
+          '\x1F+0\x1F#\x1F"key\x1F\n' +
           '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
           '\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n' +
           '\x1F+1\x1F#\x1F"D\x1F=\x1F"valueD\x1F\n',
@@ -314,9 +321,10 @@ describe("radisk", () => {
     })
     setTimeout(() => {
       assert.deepEqual(puts, {
-        "!":
-          '\x1F+0\x1F#\x1F"key\x1F=\x1F \x1F\n' +
-          '\x1F+1\x1F#\x1F"A\x1F=\x1F \x1F\n' +
+        "!": '\x1F+0\x1F#\x1F"key\x1F=\x1F \x1F\n',
+        keyA: '\x1F+0\x1F#\x1F"keyA\x1F=\x1F \x1F\n',
+        keyB:
+          '\x1F+0\x1F#\x1F"key\x1F\n' +
           '\x1F+1\x1F#\x1F"B\x1F=\x1F"valueB\x1F\n' +
           '\x1F+1\x1F#\x1F"C\x1F=\x1F \x1F\n' +
           '\x1F+1\x1F#\x1F"D\x1F=\x1F"valueD\x1F\n',
@@ -327,5 +335,166 @@ describe("radisk", () => {
       })
       done()
     }, 10)
+  })
+})
+
+describe("radisk etx in data", () => {
+  const puts = {}
+  const radisk = Radisk({
+    write: 1,
+    batch: 100,
+    cache: false,
+    store: {
+      get: (file, cb) => cb(null, puts[file]),
+      put: (file, data, cb) => {
+        puts[file] = data
+        cb(null)
+      },
+      list: cb => {
+        Object.keys(puts).sort().forEach(cb)
+        cb(null)
+      },
+    },
+  })
+  const sig = "c2lnbmF0dXJl".repeat(7) + "AA=="
+
+  test("decode values that contain etx", () => {
+    for (const value of [
+      ["a\x03b", 1234],
+      ["a\x031", 1234],
+      ["a\x03", 1234],
+      ["\x03\x03", 1234],
+      ["a\x03b", 1234, sig],
+      ["a\x031", 1234, sig],
+      [{"#": "soul\x03b"}, 1234],
+    ]) {
+      assert.deepEqual(Radisk.decode(Radisk.encode(value)), value)
+    }
+  })
+
+  test("decode values without etx as before", () => {
+    for (const value of [
+      "value",
+      ["value", 1234],
+      ["value", 1234, sig],
+      [5, 1234],
+      [true, 1234, sig],
+      [null, 1234],
+    ]) {
+      assert.deepEqual(Radisk.decode(Radisk.encode(value)), value)
+    }
+  })
+
+  test("decode a key that contains etx", () => {
+    assert.equal(Radisk.decode(Radisk.encode("a\x031"), {key: true}), "a\x031")
+  })
+
+  test("write and read keys and values that contain etx", (t, done) => {
+    radisk("key\x031", ["a\x031", 1234])
+    radisk("key\x03b", ["a\x03b", 1234, sig])
+    // Waiting until after opt.write means the values are read from the file.
+    setTimeout(() => {
+      radisk("key\x031", (err, value) => {
+        assert.deepEqual(value, ["a\x031", 1234])
+        radisk("key\x03b", (err, value) => {
+          assert.deepEqual(value, ["a\x03b", 1234, sig])
+          done()
+        })
+      })
+    }, 10)
+  })
+})
+
+describe("radisk write timer", () => {
+  test("a steady stream of writes doesn't hold back the batch", (t, done) => {
+    const radisk = Radisk({
+      write: 5,
+      cache: false,
+      store: {
+        get: (file, cb) => cb(null),
+        put: (file, data, cb) => cb(null),
+        list: cb => cb(null),
+      },
+    })
+    // Writes 1ms apart, so the stream is always within the 5ms write delay.
+    let writes = 0
+    let acked = false
+    const stream = setInterval(() => {
+      writes++
+      radisk("key" + writes, ["value", 1234], () => {
+        if (acked) return
+
+        acked = true
+        clearInterval(stream)
+        assert.ok(writes < 50, `first write saved after ${writes} writes`)
+        done()
+      })
+      if (writes === 50) clearInterval(stream)
+    }, 1)
+  })
+})
+
+describe("radisk file format", () => {
+  const puts = {}
+  const radisk = Radisk({
+    write: 1,
+    cache: false,
+    store: {
+      get: (file, cb) => cb(null, puts[file]),
+      put: (file, data, cb) => {
+        puts[file] = data
+        cb(null)
+      },
+      list: cb => {
+        Object.keys(puts).sort().forEach(cb)
+        cb(null)
+      },
+    },
+  })
+
+  test("decode values that contain unit separators", () => {
+    for (const value of [
+      "a\x1Fb",
+      "\x1F",
+      "\x1F\x1Fa\x1F",
+      ["a\x1Fb", 1234],
+      ["a\x1Fb\x03c", 1234],
+    ]) {
+      assert.deepEqual(Radisk.decode(Radisk.encode(value)), value)
+    }
+  })
+
+  test("write and read keys and values that contain unit separators", (t, done) => {
+    radisk("key\x1Fa", ["x\x1Fy", 1234])
+    radisk("key\x1Fb", ["\x1F", 1234])
+    // Waiting until after opt.write means the values are read from the file.
+    setTimeout(() => {
+      radisk("key\x1Fa", (err, value) => {
+        assert.deepEqual(value, ["x\x1Fy", 1234])
+        radisk("key\x1Fb", (err, value) => {
+          assert.deepEqual(value, ["\x1F", 1234])
+          done()
+        })
+      })
+    }, 10)
+  })
+
+  // A file is read back as the tree it was written from, so this checks a
+  // layout radisk wouldn't write itself still reads: a key repeated at the
+  // same depth, and a key split over two lines with nothing stored on the
+  // first.
+  test("read a file with repeated and split keys", (t, done) => {
+    puts["!"] =
+      '\x1F+0\x1F#\x1F"item\x1F\n' +
+      '\x1F+1\x1F#\x1F"1\x1F=\x1F"one\x031234\x1F\n' +
+      '\x1F+0\x1F#\x1F"item\x1F\n' +
+      '\x1F+1\x1F#\x1F"2\x1F=\x1F"two\x031234\x1F\n'
+    radisk("item1", (err, value) => {
+      assert.deepEqual(value, ["one", 1234])
+      radisk("item2", (err, value) => {
+        assert.deepEqual(value, ["two", 1234])
+        done()
+      })
+    })
   })
 })

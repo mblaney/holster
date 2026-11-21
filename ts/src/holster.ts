@@ -147,6 +147,10 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         if (key === "_") {
           return "error underscore cannot be used as a property name"
         }
+        // A plain object can't hold __proto__ as its own property.
+        if (key === "__proto__") {
+          return "error __proto__ cannot be used as a property name"
+        }
         if (utils.obj.is(value) || ok(value as GraphValue)) {
           keys.push(key)
           continue
@@ -250,11 +254,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       userctx?: UserIdentity | null,
       cb?: (err?: string) => void,
     ): Promise<Graph | null> => {
-      if (userctx) {
-        const timestamp = Date.now()
-        const sig = await SEA.signTimestamp(timestamp, userctx)
-        return utils.graph(soul, data, sig!, userctx.pub, timestamp)
-      }
+      if (userctx) return SEA.signProperties(soul, data, userctx as never)
 
       if (options.secure) {
         if (!cb) cb = console.log
@@ -269,7 +269,10 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
       return (data: unknown): void => {
         const ctx = allctx.get(ctxid)
         if (ctx && typeof ctx.cb !== "undefined") {
-          setTimeout(() => ctx.cb!(data as never), 1)
+          // Queued so that the context can be removed before data is returned
+          // to the callback (allows nested get calls). A timeout used to add
+          // a millisecond to every call.
+          queueMicrotask(() => ctx.cb!(data as never))
         } else if (data) {
           console.log("error no callback for data", data, "ctx", ctx)
         }
@@ -353,20 +356,24 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
 
     // Creates a rel for item on soul, or reuses one already being created
     // by a concurrent caller for the same soul+item (see pendingRel above).
-    // Calls cb(err, id) with a ready-to-display err, already prefixed where
-    // needed - callers should pass it straight through, not wrap it again.
+    // Optional values for the new node are written in the same graph as the
+    // rel, so both are saved together. Calls cb(err, id, stored) with a
+    // ready-to-display err, already prefixed where needed - callers should
+    // pass it straight through, not wrap it again. stored is false when a
+    // pending rel was reused, since values weren't written then.
     const createRel = (
       soul: string,
       item: string,
       node: Record<string, GraphValue>,
       user: UserIdentity | null | undefined,
-      cb: (err?: string | null, id?: string) => void,
+      cb: (err?: string | null, id?: string, stored?: boolean) => void,
+      values?: Record<string, GraphValue>,
     ): void => {
       let bySoul = pendingRel.get(soul)
       const pending = bySoul && bySoul.get(item)
       if (pending) {
         pending.then(
-          id => cb(undefined, id),
+          id => cb(undefined, id, false),
           err => cb(err as string),
         )
         return
@@ -396,24 +403,32 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         // fails (secure mode, no user) - pass cb straight through rather
         // than wrapping, so that message isn't prefixed a second time.
         const g = await graph(soul, node, user, cb)
-        if (g === null) {
+        const v = g && values && (await graph(id, values, user, cb))
+        if (g === null || v === null) {
           clear()
           fail(new Error("secure mode"))
           return
         }
 
-        wire.put(g, err => {
-          clear()
-          if (err) {
-            const message = `error putting ${item} on ${soul}: ${err}`
-            fail(message)
-            cb(message)
-            return
-          }
+        // id was just made up here, so wire doesn't need to check whether it's
+        // already stored.
+        const created = [id]
+        wire.put(
+          v ? Object.assign(g, v) : g,
+          err => {
+            clear()
+            if (err) {
+              const message = `error putting ${item} on ${soul}: ${err}`
+              fail(message)
+              cb(message)
+              return
+            }
 
-          settle(id)
-          cb(undefined, id)
-        })
+            settle(id)
+            cb(undefined, id, !!values)
+          },
+          created,
+        )
       })()
     }
 
@@ -589,7 +604,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
           opts = _opt
         }
 
-        if (key === null || key === "" || key === "_") {
+        if (key === null || key === "" || key === "_" || key === "__proto__") {
           console.log("error please provide a key")
           if (callback) callback(null)
           return this
@@ -654,7 +669,7 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
         }
 
         const _ack = ack(ctxid)
-        if (key === "" || key === "_") {
+        if (key === "" || key === "_" || key === "__proto__") {
           _ack(null)
           return this
         }
@@ -856,23 +871,50 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
             const id = utils.rel.is(current as GraphValue)
             if (!id) {
               if (!node) node = {} as never
-              createRel(soul, item!, node as never, ctx.user, err => {
-                if (err) {
-                  _ack(err)
-                  return
+              // The current rel doesn't exist, so add it first, along with
+              // the data's values. Nested objects need rels of their own, so
+              // they're put afterwards.
+              const values: Record<string, GraphValue> = {}
+              const nested: Record<string, GraphValue> = {}
+              for (const key of result as string[]) {
+                const value = (data as Record<string, GraphValue>)[key]!
+                if (utils.obj.is(value) && !utils.rel.is(value)) {
+                  nested[key] = value
+                } else {
+                  values[key] = value
                 }
+              }
+              const hasValues = Object.keys(values).length !== 0
+              createRel(
+                soul,
+                item!,
+                node as never,
+                ctx.user,
+                (err, _relId, stored) => {
+                  if (err) {
+                    _ack(err)
+                    return
+                  }
 
-                const _ctxid = utils.text.random()
-                const chain: ChainItem[] = [{item: item!, soul: soul}]
-                allctx.set(_ctxid, {chain: chain, user: ctx.user})
-                // Pass on the previous ctx's own callback (if any)
-                // positionally rather than pre-registering it via
-                // allctx - otherwise it's invisible to put's own "no cb
-                // given" check above, which would then wrap this retry
-                // in a brand new promise competing with (and never
-                // actually calling) the real one.
-                api(_ctxid).put(data, ctx.cb as never)
-              })
+                  const rest = stored ? nested : data
+                  if (Object.keys(rest as object).length === 0) {
+                    _ack(null)
+                    return
+                  }
+
+                  const _ctxid = utils.text.random()
+                  const chain: ChainItem[] = [{item: item!, soul: soul}]
+                  allctx.set(_ctxid, {chain: chain, user: ctx.user})
+                  // Pass on the previous ctx's own callback (if any)
+                  // positionally rather than pre-registering it via
+                  // allctx - otherwise it's invisible to put's own "no cb
+                  // given" check above, which would then wrap this retry
+                  // in a brand new promise competing with (and never
+                  // actually calling) the real one.
+                  api(_ctxid).put(rest, ctx.cb as never)
+                },
+                hasValues ? values : undefined,
+              )
               return
             }
 
@@ -1253,7 +1295,12 @@ const Holster = (opt?: HolsterOptions | string | string[]): HolsterAPI => {
               return this
             }
 
-            if (key === null || key === "" || key === "_") {
+            if (
+              key === null ||
+              key === "" ||
+              key === "_" ||
+              key === "__proto__"
+            ) {
               console.log("error please provide a key")
               if (callback) callback(null)
               return this

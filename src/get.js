@@ -1,4 +1,4 @@
-import {match, userPublicKey} from "./utils.js"
+import {match, obj, userPublicKey} from "./utils.js"
 
 const Get = (lex, graph, fast) => {
   if (!lex || typeof lex !== "object") {
@@ -13,30 +13,26 @@ const Get = (lex, graph, fast) => {
     throw new TypeError("soul must be a string")
   }
 
-  if (!graph[soul]) return
+  if (!obj.own(graph, soul)) return
 
   const node = {_: {"#": soul, ">": {}}}
-  let signatures = {}
+  const signatures = {}
+  // Copies a property with its state and signature (see SEA.signProperties).
+  const copy = key => {
+    node[key] = graph[soul][key]
+    node._[">"][key] = graph[soul]._[">"][key]
+    const sig = obj.own(graph[soul]._.s, key)
+    if (sig) signatures[key] = sig
+  }
 
   if (typeof lex["."] === "string") {
     const key = lex["."]
-    if (typeof graph[soul][key] === "undefined") return
+    if (typeof obj.own(graph[soul], key) === "undefined") return
 
-    node[key] = graph[soul][key]
-    node._[">"][key] = graph[soul]._[">"][key]
-    const state = graph[soul]._[">"][key]
-    if (graph[soul]._["s"] && graph[soul]._["s"][state]) {
-      signatures[state] = graph[soul]._["s"][state]
-    }
-
+    copy(key)
     // Always include userPublicKey for verification, regardless of filter
-    if (userPublicKey && typeof graph[soul][userPublicKey] !== "undefined") {
-      node[userPublicKey] = graph[soul][userPublicKey]
-      node._[">"][userPublicKey] = graph[soul]._[">"][userPublicKey]
-      const pkState = graph[soul]._[">"][userPublicKey]
-      if (graph[soul]._["s"] && graph[soul]._["s"][pkState]) {
-        signatures[pkState] = graph[soul]._["s"][pkState]
-      }
+    if (typeof obj.own(graph[soul], userPublicKey) !== "undefined") {
+      copy(userPublicKey)
     }
   } else {
     // For fast requests, return properties currently in the graph. Otherwise
@@ -47,20 +43,13 @@ const Get = (lex, graph, fast) => {
     for (const key of Object.keys(graph[soul])) {
       // Always include userPublicKey for verification, regardless of filter
       if (key !== "_" && (key === userPublicKey || match(lex["."], key))) {
-        node[key] = graph[soul][key]
-        node._[">"][key] = graph[soul]._[">"][key]
-        const state = graph[soul]._[">"][key]
-        if (graph[soul]._["s"] && graph[soul]._["s"][state]) {
-          signatures[state] = graph[soul]._["s"][state]
-        }
+        copy(key)
         found = true
       }
     }
     if (!found) return
   }
-  if (Object.keys(signatures).length > 0) {
-    node._["s"] = signatures
-  }
+  if (Object.keys(signatures).length > 0) node._.s = signatures
   return {[soul]: node}
 }
 

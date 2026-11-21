@@ -172,13 +172,20 @@ const createRetryHandler = (maxRetries = 5) => {
 const Wire = opt => {
   const dup = Dup()
   const store = Store(opt)
-  const graph = {}
+  // Keyed by soul, so these have no prototype (see utils.obj.own).
+  const graph = Object.create(null)
   const queue = {}
-  const listen = {}
+  const listen = Object.create(null)
   // Tracks souls that have had a complete full-node store fetch, so subsequent
   // full-node requests can read directly from the in-memory graph without a
   // redundant store round-trip. Kept in sync with graph eviction via Ham.mix.
   const hasNode = new Set()
+  const isServer = isNode && (opt.wss || opt.server || opt.port != null)
+  // Called with the properties a client has read that are still signed the
+  // way they were before property signatures, so their owner can sign them
+  // again. Servers don't accept them from the network, they only serve what
+  // they've already stored.
+  let onLegacy = null
 
   // Track references we want but don't have yet
   const pendingReferences = new Set()
@@ -334,54 +341,42 @@ const Wire = opt => {
     console.log("Run npx holster-user-storage to view full keys and all users")
   }
 
-  // The check function is required because user data must provide a public key
-  // so that it can be verified. The public key might verify the provided
-  // signature but not actually match the user under which the data is being
-  // stored. To avoid this, the current data on a soul needs to be checked to
-  // make sure the stored public key matches the one provided with the update.
-  // This must run before Ham.mix, which updates graph in place — checking
-  // afterwards would compare the incoming update's public key against itself
-  // instead of the previously stored one.
-  const check = async (data, send, cb) => {
+  // Whether a soul is user data is decided by the public key already stored on
+  // it, not by the update: an update to user data must carry the same public
+  // key, so that Ham.mix verifies it against that key, and a public key can't
+  // be added to an existing node that doesn't have one. A new soul can be
+  // created with or without one. This must run before Ham.mix, which updates
+  // graph in place. created lists souls this instance has just made up, which
+  // can't be stored yet, so they aren't looked up.
+  const check = async (data, send, cb, created) => {
     const key = utils.userPublicKey
 
     for (const soul of Object.keys(data)) {
-      const node = data[soul]
-      // If the incoming update doesn't include a userPublicKey property at all,
-      // allow it - the update is not trying to change the public key.
-      if (node[key] === undefined) continue
+      if (created && created.includes(soul)) continue
 
-      // A full-node lookup is required (rather than a targeted property
-      // lookup) so that a soul which exists but has never had a public key
-      // can be told apart from a soul that doesn't exist yet — both would
-      // otherwise resolve to the same "not found" shape for this one key.
+      const pub = utils.obj.own(data[soul], key)
+      // An update without a public key only needs to know whether the stored
+      // node has one, so that one property is looked up rather than the whole
+      // node. An update with a public key also needs to tell a new soul apart
+      // from an existing node without one, which only a full-node lookup can.
+      const lex = pub === undefined ? {"#": soul, ".": key} : {"#": soul}
       const msg = await new Promise(res => {
-        getWithCallback({"#": soul}, res, send, {put: true})
+        getWithCallback(lex, res, send, {put: true})
       })
       if (msg.err) {
         if (cb) cb(msg.err)
         return false
       }
 
-      // If there is no current node then the data is ok to write without
-      // matching public keys, as the provided soul also needs a rel on the
-      // parent node which then also requires checking. Otherwise public keys
-      // need to match for existing data.
       const existing = msg.put && msg.put[soul]
-      if (
-        !existing ||
-        existing[key] === undefined ||
-        existing[key] === node[key]
-      ) {
-        continue
-      }
+      if (!existing) continue
 
-      // If a soul exists but does not have a public key, then one should not be
-      // added because the node is not user data. The above check fails in this
-      // case if a public key is provided. Note that this is only an error case
-      // if called via the API, which is when a callback is provided here.
-      // (The wire spec can fetch and put data on the wire without a signature
-      // or public key and this can be ignored.)
+      // A lookup for one property gives it as null when it isn't stored.
+      const owner = utils.obj.own(existing, key) ?? undefined
+      if (owner === pub) continue
+
+      // Only an error when called through the API, which provides cb. Updates
+      // from peers are dropped.
       if (cb) {
         cb(`error in wire check public key does not match for soul: ${soul}`)
       }
@@ -389,6 +384,37 @@ const Wire = opt => {
     }
 
     return true
+  }
+
+  // A reply from a peer is passed to its request's callback from the graph,
+  // after put has merged it, so the callback only gets what check and
+  // Ham.mix accepted. A soul with nothing accepted reads as not found.
+  const accepted = msg => {
+    if (!msg.put) return msg
+
+    const put = {}
+    for (const [soul, node] of Object.entries(msg.put)) {
+      const current = utils.obj.own(graph, soul)
+      if (!node || typeof node !== "object" || !current) {
+        put[soul] = null
+        continue
+      }
+
+      const result = {_: {"#": soul, ">": {}}}
+      for (const key of Object.keys(node)) {
+        if (key === "_" || !Object.hasOwn(current, key)) continue
+
+        result[key] = current[key]
+        result._[">"][key] = current._[">"][key]
+        const sig = utils.obj.own(current._.s, key)
+        if (sig) {
+          if (!result._.s) result._.s = {}
+          result._.s[key] = sig
+        }
+      }
+      put[soul] = Object.keys(result).length > 1 ? result : null
+    }
+    return {...msg, put}
   }
 
   const get = (msg, send) => {
@@ -436,7 +462,18 @@ const Wire = opt => {
       opt.secure,
       listen,
       opt.maxGraphSize,
+      !isServer,
     )
+    if (onLegacy && Object.keys(update.legacy).length !== 0) {
+      // Each value is the one the graph now has for its key.
+      const legacy = {}
+      for (const [soul, keys] of Object.entries(update.legacy)) {
+        const node = msg.put[soul]
+        legacy[soul] = {[utils.userPublicKey]: node[utils.userPublicKey]}
+        for (const key of keys) legacy[soul][key] = node[key]
+      }
+      onLegacy(legacy)
+    }
     if (Object.keys(update.now).length === 0) {
       // No updates to store, check deferred.
       if (Object.keys(update.defer).length !== 0) {
@@ -553,19 +590,16 @@ const Wire = opt => {
           // missing keys — existing entries were set by ham.mix and represent
           // the authoritative merged state for those properties.
           for (const [key, value] of Object.entries(node)) {
-            if (key === "_") continue
-            if (typeof graph[soul][key] !== "undefined") continue
+            if (key === "_" || key === "__proto__") continue
+            if (typeof utils.obj.own(graph[soul], key) !== "undefined") continue
             graph[soul][key] = value
-            if (
-              node._ &&
-              node._[">"] &&
-              typeof node._[">"][key] !== "undefined"
-            ) {
-              const state = node._[">"][key]
+            const state = utils.obj.own(node._ && node._[">"], key)
+            if (typeof state !== "undefined") {
               graph[soul]._[">"][key] = state
-              if (node._["s"] && node._["s"][state]) {
-                if (!graph[soul]._["s"]) graph[soul]._["s"] = {}
-                graph[soul]._["s"][state] = node._["s"][state]
+              const sig = utils.obj.own(node._.s, key)
+              if (sig) {
+                if (!graph[soul]._.s) graph[soul]._.s = {}
+                graph[soul]._.s[key] = sig
               }
             }
           }
@@ -641,7 +675,9 @@ const Wire = opt => {
         }
         getWithCallback(lex, cb, send, _opt)
       },
-      put: async (data, cb) => {
+      // created lists any souls in data that the caller has just made up (see
+      // check).
+      put: async (data, cb, created) => {
         // Deferred updates are only stored using wire spec, they're ignored
         // here using the api. This is ok because correct timestamps should be
         // used whereas wire spec needs to handle clock skew for updates
@@ -654,7 +690,7 @@ const Wire = opt => {
             }
           }
         }
-        if (!(await check(data, send, cb))) {
+        if (!(await check(data, send, cb, created))) {
           return
         }
 
@@ -665,6 +701,7 @@ const Wire = opt => {
           opt.secure,
           listen,
           opt.maxGraphSize,
+          !isServer,
         )
         if (Object.keys(update.now).length === 0) {
           // No updates, still respond to callback.
@@ -758,10 +795,14 @@ const Wire = opt => {
           delete listen[soul]
         }
       },
+      // cb is called with the legacy properties by soul (see onLegacy).
+      legacy: cb => {
+        onLegacy = cb
+      },
     }
   }
 
-  if (isNode && (opt.wss || opt.server || opt.port != null)) {
+  if (isServer) {
     let wss = opt.wss
     // Node's websocket server provides clients as an array, whereas
     // mock-sockets provides clients as a function that returns an array.
@@ -922,7 +963,7 @@ const Wire = opt => {
           if (cb) {
             delete msg["#"]
             delete msg["@"]
-            cb(msg)
+            cb(accepted(msg))
 
             delete queue[id]
           } else {
@@ -1214,7 +1255,7 @@ const Wire = opt => {
         if (cb) {
           delete msg["#"]
           delete msg["@"]
-          cb(msg)
+          cb(accepted(msg))
 
           delete queue[id]
         }

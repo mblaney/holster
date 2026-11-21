@@ -1,6 +1,6 @@
 {
   "name": "@mblaney/holster",
-  "version": "2.3.5",
+  "version": "3.0.0",
   "description": "Holster is a service that allows synchronising data between devices using Node, Deno, Bun or the browser.",
   "type": "module",
   "main": "src/holster.js",
@@ -13,7 +13,9 @@
     "build:all": "npm run build && npm run build:ts",
     "prepublishOnly": "npm run build:all && npm run type-check",
     "type-check": "tsc -p tsconfig.json",
-    "type-check:tests": "tsc -p tsconfig.test.json"
+    "type-check:tests": "tsc -p tsconfig.test.json",
+    "bench": "node bench/run.js",
+    "bench:short": "node bench/run.js --preset short"
   },
   "bin": {
     "holster-user-storage": "utils/user-storage.js"
@@ -29,7 +31,6 @@
   "author": "Malcolm Blaney",
   "license": "Zlib, MIT, Apache-2.0",
   "dependencies": {
-    "fs": "^0.0.1-security",
     "ws": "^8.18.0",
     "zod": "^4.1.13"
   },
@@ -47,9 +48,6 @@
     "semi": false,
     "bracketSpacing": false,
     "arrowParens": "avoid"
-  },
-  "browser": {
-    "fs": false
   },
   "directories": {
     "example": "examples",

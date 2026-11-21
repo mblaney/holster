@@ -3,12 +3,80 @@
  * Cryptographic functions for signing, verification, encryption, and decryption
  */
 
-import {userPublicKey, userSignature} from "./utils.ts"
+import {graph, userPublicKey, userSignature} from "./utils.ts"
 import * as utils from "./sea-utils.ts"
 import SafeBuffer from "./buffer.ts"
-import type {UserPair, EncryptedData, SignedData} from "./schemas.ts"
+import type {
+  UserPair,
+  EncryptedData,
+  SignedData,
+  Graph,
+  GraphNode,
+  GraphValue,
+} from "./schemas.ts"
 
 type Callback<T> = (result: T) => void
+
+const curve = {name: "ECDSA", namedCurve: "P-256"}
+const ecdsa = {name: "ECDSA", hash: {name: "SHA-256"}}
+
+// Keys are imported once and used for every signature of a node.
+const signingKey = (pair: {pub: string; priv: string}): Promise<CryptoKey> =>
+  utils.subtle.importKey("jwk", utils.jwk(pair.pub, pair.priv), curve, false, [
+    "sign",
+  ])
+const verifyingKey = (publicKey: string): Promise<CryptoKey> =>
+  utils.subtle.importKey("jwk", utils.jwk(publicKey), curve, false, ["verify"])
+
+// Signs text itself as an ECDSA signature, in base64. SEA.sign signs the
+// SHA-256 hash of its message instead, so it can't make a signature that
+// signText would.
+const signText = async (text: string, key: CryptoKey): Promise<string> => {
+  const data = new TextEncoder().encode(text)
+  const sig = await utils.subtle.sign(ecdsa, key, data)
+  return SafeBuffer.from(sig, "binary").toString("base64")
+}
+
+// Checks a signature of bytes.
+const verifyBytes = async (
+  data: BufferSource,
+  signature: string,
+  key: CryptoKey,
+): Promise<boolean> => {
+  try {
+    const sig = new Uint8Array(SafeBuffer.from(signature, "base64"))
+    return await utils.subtle.verify(ecdsa, key, sig, data)
+  } catch (err) {
+    console.log(`error verifying signature: ${(err as Error).message}`)
+    return false
+  }
+}
+
+// Checks a signature from signText.
+const verifyText = (
+  text: string,
+  signature: string,
+  key: CryptoKey,
+): Promise<boolean> =>
+  verifyBytes(new TextEncoder().encode(text), signature, key)
+
+// Checks a signature of the SHA-256 hash of text, the way timestamps were
+// signed before property signatures.
+const verifyHash = async (
+  text: string,
+  signature: string,
+  key: CryptoKey,
+): Promise<boolean> =>
+  verifyBytes(new Uint8Array(await utils.sha256(text)), signature, key)
+
+// What a property's signature covers, so it can't be used for any other soul,
+// key, value or state.
+const propertyText = (
+  soul: string,
+  key: string,
+  value: unknown,
+  state: number,
+): string => JSON.stringify([soul, key, value, state])
 
 /**
  * SEA cryptographic operations
@@ -221,42 +289,9 @@ const SEA = {
   },
 
   /**
-   * Sign a timestamp to prove ownership of an update
-   */
-  signTimestamp: async (
-    timestamp: number,
-    pair: Partial<UserPair> | null,
-    cb?: Callback<string | null>,
-  ): Promise<string | null> => {
-    if (!pair || !pair.pub || !pair.priv) {
-      if (cb) cb(null)
-      return null
-    }
-
-    // Convert timestamp to string for consistent hashing
-    const timestampStr = timestamp.toString()
-    const hash = await utils.sha256(timestampStr)
-    const jwk = utils.jwk(pair.pub, pair.priv)
-    const alg = {name: "ECDSA", namedCurve: "P-256"}
-
-    const sig = await utils.subtle
-      .importKey("jwk", jwk, alg, false, ["sign"])
-      .then(key =>
-        utils.subtle.sign(
-          {name: "ECDSA", hash: {name: "SHA-256"}},
-          key,
-          new Uint8Array(hash),
-        ),
-      )
-
-    const signature = SafeBuffer.from(sig, "binary").toString("base64")
-
-    if (cb) cb(signature)
-    return signature
-  },
-
-  /**
-   * Verify a timestamp signature to confirm ownership of update
+   * Before property signatures, an update was signed by signing its
+   * timestamp, which vouches for anything claiming that timestamp. Data signed
+   * then still has to verify until its owner writes it again.
    */
   verifyTimestamp: async (
     timestamp: number,
@@ -269,38 +304,83 @@ const SEA = {
       return false
     }
 
+    let isValid = false
     try {
-      // Convert timestamp to string for consistent hashing
-      const timestampStr = timestamp.toString()
-      const hash = await utils.sha256(timestampStr)
-
-      const key = await utils.subtle.importKey(
-        "jwk",
-        utils.jwk(publicKey),
-        {name: "ECDSA", namedCurve: "P-256"},
-        false,
-        ["verify"],
-      )
-
-      const sig = new Uint8Array(SafeBuffer.from(signature, "base64"))
-      const alg = {name: "ECDSA", hash: {name: "SHA-256"}}
-
-      const isValid = await utils.subtle.verify(
-        alg,
-        key,
-        sig,
-        new Uint8Array(hash),
-      )
-
-      if (cb) cb(isValid)
-      return isValid
+      const key = await verifyingKey(publicKey)
+      isValid = await verifyHash(timestamp.toString(), signature, key)
     } catch (err) {
-      console.log(
-        `error verifying timestamp signature: ${(err as Error).message}`,
-      )
-      if (cb) cb(false)
-      return false
+      console.log(`error importing public key: ${(err as Error).message}`)
     }
+    if (cb) cb(isValid)
+    return isValid
+  },
+
+  /**
+   * Returns a graph for soul with data and the public key property that marks
+   * it as user data, each property signed by pair. A signature in _.s only
+   * verifies for its soul, key, value and state.
+   */
+  signProperties: async (
+    soul: string,
+    data: Record<string, GraphValue>,
+    pair: {pub: string; priv: string},
+  ): Promise<Graph> => {
+    const timestamp = Date.now()
+    const g = graph(soul, data, timestamp)
+    const node = g[soul]!
+    node[userPublicKey] = pair.pub
+    node._[">"][userPublicKey] = timestamp
+    const sigs: Record<string, string> = {}
+    node._.s = sigs
+    const key = await signingKey(pair)
+    await Promise.all(
+      Object.keys(node)
+        .filter(k => k !== "_")
+        .map(async k => {
+          const text = propertyText(soul, k, node[k], timestamp)
+          sigs[k] = await signText(text, key)
+        }),
+    )
+    return g
+  },
+
+  /**
+   * Maps the keys of node whose signatures in _.s verify against publicKey to
+   * whether they're from before property signatures, which is only checked
+   * when legacy is true (see verifyTimestamp).
+   */
+  verifyProperties: async (
+    soul: string,
+    node: GraphNode,
+    keys: string[],
+    publicKey: string,
+    legacy = true,
+  ): Promise<Map<string, boolean>> => {
+    const verified = new Map<string, boolean>()
+    const sigs = node._.s
+    if (!publicKey || !sigs || keys.length === 0) return verified
+
+    let key: CryptoKey
+    try {
+      key = await verifyingKey(publicKey)
+    } catch (err) {
+      console.log(`error importing public key: ${(err as Error).message}`)
+      return verified
+    }
+
+    await Promise.all(
+      keys.map(async k => {
+        const sig = sigs[k]!
+        const state = node._[">"][k]!
+        const text = propertyText(soul, k, node[k], state)
+        if (await verifyText(text, sig, key)) {
+          verified.set(k, false)
+        } else if (legacy && (await verifyHash(state.toString(), sig, key))) {
+          verified.set(k, true)
+        }
+      }),
+    )
+    return verified
   },
 
   /**
@@ -309,16 +389,23 @@ const SEA = {
   work: async (
     data: unknown,
     salt?: unknown,
+    iterations?: number | Callback<{epriv: string}>,
     cb?: Callback<{epriv: string}>,
   ): Promise<{epriv: string}> => {
     let _cb = cb
     let _salt = salt
+    let _iterations = iterations
 
     if (typeof salt === "function") {
       _cb = salt as Callback<{epriv: string}>
       _salt = undefined
     }
+    if (typeof iterations === "function") {
+      _cb = iterations
+      _iterations = undefined
+    }
     if (typeof _salt === "undefined") _salt = utils.random(9)
+    if (typeof _iterations === "undefined") _iterations = 100000
 
     const key = await utils.subtle.importKey(
       "raw",
@@ -329,7 +416,7 @@ const SEA = {
     )
     const alg = {
       name: "PBKDF2",
-      iterations: 100000,
+      iterations: _iterations,
       salt: new TextEncoder().encode(_salt as string),
       hash: {name: "SHA-256"},
     }

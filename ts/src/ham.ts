@@ -71,6 +71,7 @@ Ham.mix = async (
   secure: boolean,
   listen: ListenMap,
   maxGraphSize = MAX_GRAPH_SIZE,
+  legacy = true,
 ): Promise<HamMixResult> => {
   if (!change || typeof change !== "object") {
     throw new TypeError("change must be an object")
@@ -83,24 +84,30 @@ Ham.mix = async (
   }
 
   const machine = Date.now()
-  const now: Graph = {}
-  const defer: Graph = {}
+  // Keyed by soul, so these have no prototype (see utils.obj.own).
+  const now: Graph = Object.create(null)
+  const defer: Graph = Object.create(null)
   const listeners: Array<() => void> = []
-  const validProperties = new Map<string, Set<string>>()
-  const validTimestamps = new Map<string, Set<number>>()
+  const validProperties = new Map<string, Map<string, boolean>>()
+  // Properties in the graph that are only signed the way they were before
+  // property signatures, by soul, so their owner can sign them again.
+  const legacyKeys: Record<string, string[]> = Object.create(null)
   let wait = 0
+  let added = 0 // Souls added to the graph by this call
 
   for (const soul of Object.keys(change)) {
     const node = change[soul]
-    if (!node || !node._) continue
+    // __proto__ can't be stored as a soul or key in a plain object.
+    if (soul === "__proto__" || !node || !node._) continue
 
     let updated = false
     let alias = false
     let verify = secure
 
     const pub = node[utils.userPublicKey] as string | undefined
-    // If timestamp signatures and public key are provided then always verify
-    if (node._["s"] && pub) verify = true
+    // An update that claims a public key is always verified, so one without
+    // signatures has nothing verified and is dropped.
+    if (pub) verify = true
 
     // Special case if soul starts with "~". Node must be system data ie,
     // ~@alias or ~publickey. For aliases, key and value must be a self
@@ -119,70 +126,41 @@ Ham.mix = async (
     }
 
     if (verify) {
-      if (!pub || !node._) {
-        continue
-      }
+      if (!pub) continue
 
-      const signedTimestamps = new Set<number>()
-      const signedProperties = new Set<string>()
+      // Each property needs its own signature in _.s (see SEA.signProperties).
+      // One with a state older than the graph's would be ignored anyway, so it
+      // isn't checked.
+      const current = utils.obj.own(graph, soul)
+      const keys = Object.keys(node).filter(key => {
+        if (key === "_") return false
 
-      const incomingTimestamps = Object.entries(node._[">"] || {})
+        const sig = utils.obj.own(node._.s, key)
+        const state = utils.obj.own(node._[">"], key)
+        if (!sig || typeof state !== "number") return false
 
-      for (const [key, sig] of Object.entries(node._["s"] || {})) {
-        const asNumber = Number(key)
-        if (!isNaN(asNumber) && asNumber > 0) {
-          const propsForTimestamp = incomingTimestamps.filter(
-            ([, ts]) => Number(ts) === asNumber,
-          )
-          const allNewerInGraph =
-            propsForTimestamp.length > 0 &&
-            propsForTimestamp.every(([prop]) => {
-              const graphState =
-                graph[soul] && graph[soul]!._[">"]
-                  ? graph[soul]!._[">"][prop]
-                  : 0
-              return graphState !== undefined && graphState > asNumber
-            })
+        const currentState = utils.obj.own(current && current._[">"], key)
+        return !(currentState !== undefined && currentState > state)
+      })
+      const signed = await SEA.verifyProperties(soul, node, keys, pub, legacy)
+      if (signed.size === 0) continue
 
-          if (allNewerInGraph) {
-            continue
-          }
-
-          const isValid = await SEA.verifyTimestamp(
-            asNumber,
-            sig as string,
-            pub,
-          )
-          if (isValid) {
-            signedTimestamps.add(asNumber)
-            for (const [prop, ts] of incomingTimestamps) {
-              if (Number(ts) === asNumber) {
-                signedProperties.add(prop)
-              }
-            }
-          }
-        }
-      }
-
-      if (signedProperties.size === 0) {
-        continue
-      }
-
-      validProperties.set(soul, signedProperties)
-      validTimestamps.set(soul, signedTimestamps)
+      validProperties.set(soul, signed)
     }
 
     for (const key of Object.keys(node)) {
-      if (key === "_") continue
+      if (key === "_" || key === "__proto__") continue
 
       if (validProperties.has(soul) && !validProperties.get(soul)!.has(key)) {
         continue
       }
 
       const value = node[key]!
-      const state = (node._ && node._[">"] ? node._[">"][key] : 0) || 0
-      const currentValue = graph[soul] ? graph[soul][key] : undefined
-      const currentState = graph[soul] ? graph[soul]._[">"][key] || 0 : 0
+      const state =
+        (node._ && node._[">"] ? utils.obj.own(node._[">"], key) : 0) || 0
+      const current = utils.obj.own(graph, soul)
+      const currentValue = utils.obj.own(current, key)
+      const currentState = utils.obj.own(current && current._[">"], key) || 0
 
       if (alias && key !== utils.rel.is(value)) {
         console.log(`error alias ${alias}: ${key} !== ${utils.rel.is(value)}`)
@@ -194,21 +172,16 @@ Ham.mix = async (
         if (skew > 86400000) continue
 
         if (wait === 0 || skew < wait) wait = skew
+        const sig = utils.obj.own(node._.s, key)
         if (!defer[soul]) {
-          const stateVector: Record<string, number> = {}
-          const signatures: Record<string, string> | undefined = {}
-          defer[soul] = {
-            _: {"#": soul, ">": stateVector, s: signatures},
-          } as GraphNode
+          defer[soul] = {_: {"#": soul, ">": {}, s: {}}} as GraphNode
         }
         defer[soul]![key] = value
         defer[soul]!._[">"][key] = state
-        if (node._["s"] && node._["s"][state]) {
-          defer[soul]!._["s"]![state] = node._["s"][state]
-        }
+        if (sig) defer[soul]!._.s![key] = sig
       } else {
         const isSigned =
-          validTimestamps.has(soul) && validTimestamps.get(soul)!.has(state)
+          validProperties.has(soul) && validProperties.get(soul)!.has(key)
         const result = Ham(
           state,
           currentState,
@@ -216,29 +189,31 @@ Ham.mix = async (
           currentValue ?? null,
           isSigned,
         )
+        if (
+          (result.incoming || result.state) &&
+          isSigned &&
+          validProperties.get(soul)!.get(key)
+        ) {
+          if (!legacyKeys[soul]) legacyKeys[soul] = []
+          legacyKeys[soul]!.push(key)
+        }
         if (result.incoming) {
           if (!now[soul]) {
-            const stateVector1: Record<string, number> = {}
-            const signatures1: Record<string, string> | undefined = {}
-            now[soul] = {
-              _: {"#": soul, ">": stateVector1, s: signatures1},
-            } as GraphNode
+            now[soul] = {_: {"#": soul, ">": {}, s: {}}} as GraphNode
           }
-          if (!graph[soul]) {
-            const stateVector2: Record<string, number> = {}
-            const signatures2: Record<string, string> | undefined = {}
-            graph[soul] = {
-              _: {"#": soul, ">": stateVector2, s: signatures2},
-            } as GraphNode
+          if (!current) {
+            graph[soul] = {_: {"#": soul, ">": {}, s: {}}} as GraphNode
+            added++
           }
           graph[soul]![key] = now[soul]![key] = value
           graph[soul]!._[">"][key] = now[soul]!._[">"][key] = state
-          if (node._["s"] && node._["s"][state]) {
-            graph[soul]!._["s"]![state] = now[soul]!._["s"]![state] =
-              node._["s"][state]
+          const sig = utils.obj.own(node._.s, key)
+          if (sig) {
+            if (!graph[soul]!._.s) graph[soul]!._.s = {}
+            graph[soul]!._.s![key] = now[soul]!._.s![key] = sig
           }
 
-          if (listen[soul]) {
+          if (utils.obj.own(listen, soul)) {
             listen[soul]!.filter(l => utils.match(l["."], key)).forEach(l =>
               listeners.push(l.cb as () => void),
             )
@@ -248,30 +223,65 @@ Ham.mix = async (
       }
     }
 
-    if (updated && listen[soul]) {
+    if (updated && utils.obj.own(listen, soul)) {
       listen[soul]!.filter(l => utils.match(l["."])).forEach(l =>
         listeners.push(l.cb as () => void),
       )
     }
   }
 
-  const souls = Object.keys(graph)
-  if (souls.length > maxGraphSize) {
-    const soulsByAge = souls
-      .map(soul => {
-        const states = graph[soul]!._ && graph[soul]!._[">"]
-        const maxState = states ? Math.max(...Object.values(states)) : 0
-        return {soul, maxState}
-      })
-      .sort((a, b) => a.maxState - b.maxState)
-    const remove = soulsByAge.slice(0, souls.length - maxGraphSize)
-    remove.forEach(({soul}) => {
-      delete graph[soul]
-      if (hasNode) hasNode.delete(soul)
-    })
+  limitGraph(graph, hasNode, maxGraphSize, added)
+  return {now, defer, wait, listeners, legacy: legacyKeys}
+}
+
+// Counting every soul in the graph on every call was most of the time a
+// write took, so each graph's size is remembered from its last count, plus
+// the souls Ham.mix has added since.
+const graphSizes = new WeakMap<
+  Graph,
+  {size: number; added: number; calls: number}
+>()
+// wire.ts also adds souls it reads from the store, which aren't counted
+// above, so the graph is counted again after this many calls regardless.
+const RECOUNT_CALLS = 1000
+
+// Removes the graph's oldest souls once it's over maxGraphSize, down to 90%
+// of it, so the souls are only sorted every few hundred new ones rather
+// than on every write.
+function limitGraph(
+  graph: Graph,
+  hasNode: Set<string> | undefined,
+  maxGraphSize: number,
+  added: number,
+): void {
+  const known = graphSizes.get(graph) ?? {size: 0, added: 0, calls: 0}
+  graphSizes.set(graph, known)
+  known.added += added
+  known.calls++
+  if (known.size + known.added <= maxGraphSize && known.calls < RECOUNT_CALLS) {
+    return
   }
 
-  return {now, defer, wait, listeners}
+  const souls = Object.keys(graph)
+  known.size = souls.length
+  known.added = 0
+  known.calls = 0
+  if (souls.length <= maxGraphSize) return
+
+  const soulsByAge = souls
+    .map(soul => {
+      const states = graph[soul]!._ && graph[soul]!._[">"]
+      const maxState = states ? Math.max(...Object.values(states)) : 0
+      return {soul, maxState}
+    })
+    .sort((a, b) => a.maxState - b.maxState)
+  const keep = Math.floor(maxGraphSize * 0.9)
+  const remove = soulsByAge.slice(0, souls.length - keep)
+  remove.forEach(({soul}) => {
+    delete graph[soul]
+    if (hasNode) hasNode.delete(soul)
+  })
+  known.size = keep
 }
 
 export default Ham
