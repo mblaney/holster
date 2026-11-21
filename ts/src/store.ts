@@ -27,6 +27,22 @@ const unit = String.fromCharCode(31)
 // On-disk root node format
 const root = unit + "+0" + unit + "#" + unit + '"root' + unit
 
+// File names come from souls, which can contain any character. Characters
+// that can't be in a file name, or that would lead outside the data
+// directory, are written as %XX, as are % itself, the names "." and "..",
+// and a trailing dot or space.
+const hex = (c: string): string =>
+  "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")
+const encodeName = (name: string): string => {
+  if (name === "." || name === "..") return name.replace(/\./g, hex)
+  return name.replace(/[%/\\<>:"|?*\x00-\x1F\x7F]/g, hex).replace(/[. ]$/, hex)
+}
+// Radisk compares file names with keys, so list gives them back decoded.
+const decodeName = (name: string): string =>
+  name.replace(/%([0-9A-F]{2})/g, (_match, code: string) =>
+    String.fromCharCode(parseInt(code, 16)),
+  )
+
 /**
  * Create file system storage backend
  */
@@ -39,22 +55,27 @@ const fileSystem = (opt: StoreOptions): FileSystemInterface => {
 
     return {
       get: (file, cb) => {
-        fs!.readFile(
-          dir + "/" + file,
-          (err: NodeJS.ErrnoException | null, data?: Buffer) => {
-            if (err) {
-              if ((err as {code?: string}).code === "ENOENT") {
-                cb()
-                return
-              }
-              console.log("fs.readFile error:", err)
-            }
-            const dataStr = data ? data.toString() : undefined
-            cb(err as never, dataStr)
-          },
-        )
+        // Read synchronously: under heavy concurrent writes, the callback of
+        // an async read's final close was sometimes never called, leaving
+        // radisk reads waiting for its 30 second hang timeout. A file is at
+        // most opt.size, so this only blocks for about a millisecond.
+        let data: string
+        try {
+          data = fs!.readFileSync(dir + "/" + encodeName(file)).toString()
+        } catch (err) {
+          if ((err as {code?: string}).code === "ENOENT") {
+            cb()
+            return
+          }
+          console.log("fs.readFileSync error:", err)
+          cb(err as never)
+          return
+        }
+        cb(null, data)
       },
       put: (file, data, cb) => {
+        file = encodeName(file)
+        // Don't put tmp files under dir so that they're not listed.
         const tmp = file + "." + utils.text.random(9) + ".tmp"
         fs!.writeFile(
           tmp,
@@ -78,7 +99,7 @@ const fileSystem = (opt: StoreOptions): FileSystemInterface => {
               cb()
               return
             }
-            if (files) files.forEach(cb)
+            if (files) files.forEach(file => cb(decodeName(file)))
             cb()
           },
         )
@@ -255,10 +276,10 @@ const Store = (opt?: StoreOptions): StoreInterface => {
         if (!node) node = {_: {"#": soul, ">": {}}}
         node[k] = value[0]
         node._[">"][k] = value[1]
-        // If signature is present, store it in _["s"]
-        if (value.length === 3 && value[2]) {
-          signatures[value[1].toString()] = value[2]
-        }
+        // Each property is stored with its own signature, which is either a
+        // property signature or, for older data, a timestamp signature. Only
+        // clients accept timestamp signatures (see SEA.verifyProperties).
+        if (value.length === 3 && value[2]) signatures[k] = value[2]
       }
 
       // When doing a targeted property lookup, also fetch userPublicKey in
@@ -271,16 +292,13 @@ const Store = (opt?: StoreOptions): StoreInterface => {
         if (err && !cbErr) cbErr = err
         if (--pending > 0) return
         const graph: Graph = {[soul]: node!}
-        if (node && Object.keys(signatures).length > 0) {
-          node._["s"] = signatures
-        }
+        if (node && Object.keys(signatures).length > 0) node._.s = signatures
         cb(cbErr, graph)
       }
 
       radisk(soul + enq + key, (err, value) => {
         if (utils.obj.is(value)) {
           Radix.map(value as never, each)
-          if (!node) each(value as never, key)
         } else if (value) {
           each(value as EncodedValue, key)
         }
@@ -327,7 +345,7 @@ const Store = (opt?: StoreOptions): StoreInterface => {
           count++
           const value = node[key]!
           const state = node._[">"][key]!
-          const sig = node._["s"] && node._["s"][state]
+          const sig = utils.obj.own(node._.s, key)
           const data: EncodedValue = sig ? [value, state, sig] : [value, state]
           radisk(soul + enq + key, data, ack)
         })
@@ -336,5 +354,5 @@ const Store = (opt?: StoreOptions): StoreInterface => {
   }
 }
 
-export {fileSystem}
+export {fileSystem, encodeName, decodeName}
 export default Store

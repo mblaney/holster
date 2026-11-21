@@ -10,6 +10,11 @@
 /.user_storage.json
 /.user_limit.json
 
+# benchmark
+/bench/node_modules
+/bench/data
+/bench/results
+
 # misc
 *~
 npm-debug.log

@@ -220,21 +220,40 @@ const createRetryHandler = (maxRetries = 5) => {
 
 export interface WireAPI {
   get: (lex: Lex, cb: (msg: WireMessage) => void, _opt?: WireOptions) => void
-  put: (data: Graph, cb?: (err?: string | null) => void) => Promise<void> | void
+  // created lists any souls in data that the caller has just made up (see
+  // check).
+  put: (
+    data: Graph,
+    cb?: (err?: string | null) => void,
+    created?: string[],
+  ) => Promise<void> | void
   on: (lex: Lex, cb: () => void, _get?: boolean, _opt?: WireOptions) => void
   off: (lex: Lex, cb: () => void) => void
+  // cb is called with the legacy properties by soul (see onLegacy).
+  legacy: (cb: (data: LegacyData) => void) => void
 }
+
+// Values by soul, each with the public key of the user who signed them.
+export type LegacyData = Record<string, Record<string, GraphValue>>
 
 const Wire = (opt: HolsterOptions): WireAPI => {
   const options = opt || {}
   const dup = Dup()
   const store = Store(options as never)
-  const graph: Graph = {}
+  // Keyed by soul, so these have no prototype (see utils.obj.own).
+  const graph: Graph = Object.create(null)
   const queue: Record<string, (msg: WireMessage) => void> = {}
-  const listen: ListenMap = {}
+  const listen: ListenMap = Object.create(null)
 
   const pendingReferences = new Set<string>()
   const hasNode = new Set<string>()
+  const isServer =
+    isNode && !!(options.wss || options.server || options.port != null)
+  // Called with the properties a client has read that are still signed the
+  // way they were before property signatures, so their owner can sign them
+  // again. Servers don't accept them from the network, they only serve what
+  // they've already stored.
+  let onLegacy: ((data: LegacyData) => void) | null = null
 
   // Debounce client-side wire update checks: skip if the same lex was checked
   // recently. Keyed by "soul" or "soul.property", and cleared on connect so
@@ -390,52 +409,48 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     console.log("Run npx holster-user-storage to view full keys and all users")
   }
 
-  // The check function is required because user data must provide a public key
-  // so that it can be verified. The public key might verify the provided
-  // signature but not actually match the user under which the data is being
-  // stored. To avoid this, the current data on a soul needs to be checked to
-  // make sure the stored public key matches the one provided with the update.
-  // This must run before Ham.mix, which updates graph in place — checking
-  // afterwards would compare the incoming update's public key against itself
-  // instead of the previously stored one.
+  // Whether a soul is user data is decided by the public key already stored on
+  // it, not by the update: an update to user data must carry the same public
+  // key, so that Ham.mix verifies it against that key, and a public key can't
+  // be added to an existing node that doesn't have one. A new soul can be
+  // created with or without one. This must run before Ham.mix, which updates
+  // graph in place. created lists souls this instance has just made up, which
+  // can't be stored yet, so they aren't looked up.
   const check = async (
     data: Graph,
     send: (msg: string) => {err?: string} | void,
     cb?: (err?: string | null) => void,
+    created?: string[],
   ): Promise<boolean> => {
     const key = utils.userPublicKey
 
     for (const soul of Object.keys(data)) {
-      const node = data[soul]!
-      // If the incoming update doesn't include a userPublicKey property at all,
-      // allow it - the update is not trying to change the public key.
-      if (node[key] === undefined) continue
+      if (created && created.includes(soul)) continue
 
-      // A full-node lookup is required (rather than a targeted property
-      // lookup) so that a soul which exists but has never had a public key
-      // can be told apart from a soul that doesn't exist yet — both would
-      // otherwise resolve to the same "not found" shape for this one key.
+      const pub = utils.obj.own(data[soul] as Record<string, unknown>, key)
+      // An update without a public key only needs to know whether the stored
+      // node has one, so that one property is looked up rather than the whole
+      // node. An update with a public key also needs to tell a new soul apart
+      // from an existing node without one, which only a full-node lookup can.
+      const lex: Lex = pub === undefined ? {"#": soul, ".": key} : {"#": soul}
       const msg = await new Promise<WireMessage>(res => {
-        getWithCallback({"#": soul}, res, send, {put: true})
+        getWithCallback(lex, res, send, {put: true})
       })
       if (msg.err) {
         if (cb) cb(msg.err)
         return false
       }
 
-      // If there is no current node then the data is ok to write without
-      // matching public keys, as the provided soul also needs a rel on the
-      // parent node which then also requires checking. Otherwise public keys
-      // need to match for existing data.
       const existing = msg.put && msg.put[soul]
-      if (
-        !existing ||
-        existing[key] === undefined ||
-        existing[key] === node[key]
-      ) {
-        continue
-      }
+      if (!existing) continue
 
+      // A lookup for one property gives it as null when it isn't stored.
+      const owner =
+        utils.obj.own(existing as Record<string, unknown>, key) ?? undefined
+      if (owner === pub) continue
+
+      // Only an error when called through the API, which provides cb. Updates
+      // from peers are dropped.
       if (cb) {
         cb(`error in wire check public key does not match for soul: ${soul}`)
       }
@@ -443,6 +458,37 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     }
 
     return true
+  }
+
+  // A reply from a peer is passed to its request's callback from the graph,
+  // after put has merged it, so the callback only gets what check and
+  // Ham.mix accepted. A soul with nothing accepted reads as not found.
+  const accepted = (msg: WireMessage): WireMessage => {
+    if (!msg.put) return msg
+
+    const put: Graph = {}
+    for (const [soul, node] of Object.entries(msg.put)) {
+      const current = utils.obj.own(graph, soul)
+      if (!node || typeof node !== "object" || !current) {
+        put[soul] = null as never
+        continue
+      }
+
+      const result: GraphNode = {_: {"#": soul, ">": {}}}
+      for (const key of Object.keys(node)) {
+        if (key === "_" || !Object.hasOwn(current, key)) continue
+
+        result[key] = current[key]!
+        result._[">"][key] = current._[">"][key]!
+        const sig = utils.obj.own(current._.s, key)
+        if (sig) {
+          if (!result._.s) result._.s = {}
+          result._.s[key] = sig
+        }
+      }
+      put[soul] = (Object.keys(result).length > 1 ? result : null) as never
+    }
+    return {...msg, put}
   }
 
   const get = (
@@ -495,7 +541,21 @@ const Wire = (opt: HolsterOptions): WireAPI => {
       options.secure || false,
       listen,
       options.maxGraphSize,
+      !isServer,
     )
+    if (onLegacy && Object.keys(update.legacy).length !== 0) {
+      // Each value is the one the graph now has for its key.
+      const legacy: LegacyData = {}
+      for (const [soul, keys] of Object.entries(update.legacy)) {
+        const node = msg.put[soul]!
+        const data: Record<string, GraphValue> = {
+          [utils.userPublicKey]: node[utils.userPublicKey]!,
+        }
+        for (const key of keys) data[key] = node[key]!
+        legacy[soul] = data
+      }
+      onLegacy(legacy)
+    }
     if (Object.keys(update.now).length === 0) {
       if (Object.keys(update.defer).length !== 0) {
         setTimeout(
@@ -609,18 +669,19 @@ const Wire = (opt: HolsterOptions): WireAPI => {
             continue
           }
           for (const [key, value] of Object.entries(node)) {
-            if (key === "_") continue
+            if (key === "_" || key === "__proto__") continue
             const gNode = graph[soul] as unknown as Record<string, unknown>
-            if (typeof gNode[key] !== "undefined") continue
+            if (typeof utils.obj.own(gNode, key) !== "undefined") continue
             gNode[key] = value
             const meta = (node as unknown as GraphNode)._
-            if (meta?.[">"] && typeof meta[">"][key] !== "undefined") {
-              const state = meta[">"][key]
+            const state = utils.obj.own(meta?.[">"], key)
+            if (typeof state !== "undefined") {
               const gMeta = (graph[soul] as unknown as GraphNode)._
               gMeta[">"][key] = state
-              if (meta["s"]?.[state]) {
-                if (!gMeta["s"]) gMeta["s"] = {}
-                gMeta["s"]![state] = meta["s"][state]
+              const sig = utils.obj.own(meta.s, key)
+              if (sig) {
+                if (!gMeta.s) gMeta.s = {}
+                gMeta.s[key] = sig
               }
             }
           }
@@ -693,7 +754,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         }
         getWithCallback(lex, cb, send, _opt)
       },
-      put: async (data, cb) => {
+      put: async (data, cb, created) => {
         const oldGraphBytes: Record<string, number> = {}
         if (options.userLimit) {
           for (const [soul, node] of Object.entries(data)) {
@@ -702,7 +763,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
             }
           }
         }
-        if (!(await check(data, send as never, cb))) {
+        if (!(await check(data, send as never, cb, created))) {
           return
         }
 
@@ -713,6 +774,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
           options.secure || false,
           listen,
           options.maxGraphSize,
+          !isServer,
         )
         if (Object.keys(update.now).length === 0) {
           if (cb) cb(null)
@@ -798,10 +860,13 @@ const Wire = (opt: HolsterOptions): WireAPI => {
           delete listen[soul]
         }
       },
+      legacy: cb => {
+        onLegacy = cb
+      },
     }
   }
 
-  if (isNode && (options.wss || options.server || options.port != null)) {
+  if (isServer) {
     let wss = options.wss
     let clients = (): WebSocket[] =>
       (wss as {clients?: () => WebSocket[]}).clients?.() || []
@@ -965,7 +1030,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
           if (cb) {
             delete (msg as {"#"?: string})["#"]
             delete (msg as {"@"?: string})["@"]
-            cb(msg)
+            cb(accepted(msg))
             delete queue[id!]
           } else {
             send(data.toString(), isBinary)
@@ -1253,7 +1318,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         if (cb) {
           delete (msg as {"#"?: string})["#"]
           delete (msg as {"@"?: string})["@"]
-          cb(msg)
+          cb(accepted(msg))
           delete queue[id!]
         }
       }

@@ -4,7 +4,6 @@ import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Wire from "../src/wire.js"
 import SEA from "../src/sea.js"
-import * as utils from "../src/utils.js"
 
 describe("wire", () => {
   // Need different websocket servers otherwise data on file will sync up.
@@ -270,11 +269,7 @@ describe("wire", () => {
     const pairA = await SEA.pair()
     const pairB = await SEA.pair()
 
-    const graphFor = async (pair, value) => {
-      const timestamp = Date.now()
-      const sig = await SEA.signTimestamp(timestamp, pair)
-      return utils.graph(soul, {value}, sig, pair.pub, timestamp)
-    }
+    const graphFor = (pair, value) => SEA.signProperties(soul, {value}, pair)
 
     const first = await graphFor(pairA, "from A")
     await new Promise((resolve, reject) => {

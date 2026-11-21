@@ -21,6 +21,9 @@ export const obj = {
     const match = toString.match(/^\[object (\w+)\]$/)
     return o.constructor === Object || (match && match[1] === "Object")
   },
+  // Returns o[key] only when o has key itself, so a key such as constructor
+  // isn't matched by a property every object inherits.
+  own: (o, key) => (o && Object.hasOwn(o, key) ? o[key] : undefined),
   map: (list, cb, o) => {
     var keys = Object.keys(list)
     for (let i = 0; i < keys.length; i++) {
@@ -78,21 +81,16 @@ export const rel = {
 export const userSignature = "_holster_user_signature"
 export const userPublicKey = "_holster_user_public_key"
 
-// graph converts objects to graph format with updated states,
-// with optional meta data to verify signed data.
-export const graph = (soul, data, sig, pub, timestamp) => {
+// graph converts objects to graph format, with every property given the same
+// state. User data is signed with SEA.signProperties instead.
+export const graph = (soul, data, timestamp = Date.now()) => {
   const g = {[soul]: {_: {"#": soul, ">": {}}}}
 
   for (const [key, value] of Object.entries(data)) {
     if (key !== "_" && key !== userPublicKey && key !== userSignature) {
       g[soul][key] = value
-      g[soul]._[">"][key] = timestamp || Date.now()
+      g[soul]._[">"][key] = timestamp
     }
-  }
-  if (sig && pub && timestamp) {
-    g[soul]._["s"] = {[timestamp]: sig}
-    g[soul][userPublicKey] = pub
-    g[soul]._[">"][userPublicKey] = timestamp
   }
   return g
 }

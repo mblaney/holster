@@ -57,9 +57,11 @@ describe("system - never written property returns null immediately", () => {
   })
 
   test("cleanup", (t, done) => {
+    // The data sent back above can still be being written when this runs,
+    // so removing the directory is retried.
     fs.rm(
       "test/system/chain-never-written",
-      {recursive: true, force: true},
+      {recursive: true, force: true, maxRetries: 5, retryDelay: 20},
       err => {
         assert.equal(err, null)
         done()

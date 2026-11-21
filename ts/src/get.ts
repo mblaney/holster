@@ -3,7 +3,7 @@
  * Extracts nodes and properties based on lex queries
  */
 
-import {match, userPublicKey} from "./utils.ts"
+import {match, obj, userPublicKey} from "./utils.ts"
 import type {Lex, Graph} from "./schemas.ts"
 import type {GraphNode} from "./schemas.ts"
 
@@ -26,33 +26,28 @@ const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
     throw new TypeError("soul must be a string")
   }
 
-  if (!graph[soul]) return undefined
+  if (!obj.own(graph, soul)) return undefined
 
+  const current = graph[soul]!
   const stateVector: Record<string, number> = {}
   const node: GraphNode = {_: {"#": soul, ">": stateVector}}
   const signatures: Record<string, string> = {}
+  // Copies a property with its state and signature (see SEA.signProperties).
+  const copy = (key: string): void => {
+    node[key] = current[key]!
+    stateVector[key] = current._[">"][key]!
+    const sig = obj.own(current._.s, key)
+    if (sig) signatures[key] = sig
+  }
 
   if (typeof lex["."] === "string") {
     const key = lex["."]
-    if (typeof graph[soul]![key] === "undefined") return undefined
+    if (typeof obj.own(current, key) === "undefined") return undefined
 
-    node[key] = graph[soul]![key]
-    node._[">"][key] = graph[soul]!._[">"][key]!
-    const state = graph[soul]!._[">"][key]!
-    const sigs = graph[soul]!._["s"]
-    if (sigs && sigs[state]) {
-      signatures[state.toString()] = sigs[state]!
-    }
-
+    copy(key)
     // Always include userPublicKey for verification, regardless of filter
-    if (userPublicKey && typeof graph[soul]![userPublicKey] !== "undefined") {
-      node[userPublicKey] = graph[soul]![userPublicKey]
-      node._[">"][userPublicKey] = graph[soul]!._[">"][userPublicKey]!
-      const pkState = graph[soul]!._[">"][userPublicKey]!
-      const pkSigs = graph[soul]!._["s"]
-      if (pkSigs && pkSigs[pkState]) {
-        signatures[pkState.toString()] = pkSigs[pkState]!
-      }
+    if (typeof obj.own(current, userPublicKey) !== "undefined") {
+      copy(userPublicKey)
     }
   } else {
     // For fast requests, return properties currently in the graph. Otherwise
@@ -60,25 +55,17 @@ const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
     if (!fast) return undefined
 
     let found = false
-    for (const key of Object.keys(graph[soul]!)) {
+    for (const key of Object.keys(current)) {
       // Always include userPublicKey for verification, regardless of filter
       if (key !== "_" && (key === userPublicKey || match(lex["."], key))) {
-        node[key] = graph[soul]![key]!
-        node._[">"][key] = graph[soul]!._[">"][key]!
-        const state = graph[soul]!._[">"][key]!
-        const sigs = graph[soul]!._["s"]
-        if (sigs && sigs[state]) {
-          signatures[state.toString()] = sigs[state]!
-        }
+        copy(key)
         found = true
       }
     }
     if (!found) return undefined
   }
 
-  if (Object.keys(signatures).length > 0) {
-    node._["s"] = signatures
-  }
+  if (Object.keys(signatures).length > 0) node._.s = signatures
   return {[soul]: node}
 }
 

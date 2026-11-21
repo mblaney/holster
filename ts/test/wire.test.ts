@@ -4,7 +4,6 @@ import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Wire from "../src/wire.ts"
 import SEA from "../src/sea.ts"
-import * as utils from "../src/utils.ts"
 import type {WireInterface} from "../src/schemas.ts"
 
 describe("wire", () => {
@@ -272,14 +271,8 @@ describe("wire", () => {
     const pairA = await SEA.pair()
     const pairB = await SEA.pair()
 
-    const graphFor = async (
-      pair: {pub: string; priv: string},
-      value: string,
-    ) => {
-      const timestamp = Date.now()
-      const sig = await SEA.signTimestamp(timestamp, pair as never)
-      return utils.graph(soul, {value}, sig as never, pair.pub, timestamp)
-    }
+    const graphFor = (pair: {pub: string; priv: string}, value: string) =>
+      SEA.signProperties(soul, {value}, pair)
 
     const first = await graphFor(pairA, "from A")
     await new Promise<void>((resolve, reject) => {

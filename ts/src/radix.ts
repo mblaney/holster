@@ -27,6 +27,11 @@ const isRadixTree = (value: unknown): value is RadixTree => {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+// Trees are keyed by parts of keys, so they have no prototype. Otherwise a
+// key such as constructor would match a property every object inherits,
+// and __proto__ would change the prototype itself.
+const Tree = <T = RadixValue>(): Record<string, T> => Object.create(null)
+
 /**
  * Create a new Radix tree
  */
@@ -38,13 +43,13 @@ const Radix = (): RadixFunction => {
   ): RadixNode | EncodedValue | undefined | Record<string, EncodedValue> => {
     if (!tree) {
       if (!(radix as Record<string, unknown>)[group])
-        (radix as Record<string, unknown>)[group] = {}
+        (radix as Record<string, unknown>)[group] = Tree()
       tree = (radix as Record<string, RadixTree>)[group]!
     }
     if (!keys) return tree
 
     let i = 0
-    let tmp: Record<string, RadixValue> = {}
+    let tmp: Record<string, RadixValue> = Tree()
     let key = keys[i]!
     const max = keys.length - 1
     const noValue = typeof value === "undefined"
@@ -116,10 +121,9 @@ const Radix = (): RadixFunction => {
       if (bestKey) {
         const hasValue = tree![bestKey]!
         const j = bestMatch.length
-        const replace: RadixTree = {
-          [bestKey.slice(j)]: hasValue,
-          [keys.slice(j)]: {[record]: value!},
-        }
+        const replace: RadixTree = Tree()
+        replace[bestKey.slice(j)] = hasValue
+        replace[keys.slice(j)] = {[record]: value!}
         tree![bestMatch] = {[group]: replace}
         delete tree![bestKey]
       } else {
@@ -138,7 +142,7 @@ const Radix = (): RadixFunction => {
       found[record] = value!
     } else {
       // Found at a shorter key, try again
-      if (!found[group] && !noValue) found[group] = {}
+      if (!found[group] && !noValue) found[group] = Tree()
       const nextTree = found[group]
       if (isRadixTree(nextTree)) {
         return radix(keys.slice(++i), value, nextTree as RadixTree) as RadixNode
@@ -151,8 +155,11 @@ const Radix = (): RadixFunction => {
   return radix
 }
 
+Radix.tree = Tree
+
 /**
- * Map over all values in a radix tree
+ * Map over all values in a radix tree. prefix is pre joined, passed down so
+ * it isn't joined again for each key.
  */
 Radix.map = function map(
   radix: RadixFunction | RadixNode,
@@ -164,10 +171,25 @@ Radix.map = function map(
   ) => unknown,
   opt?: boolean,
   pre: string[] = [],
+  prefix: string = pre.join(""),
 ): unknown {
   const tree = ((radix as Record<string, RadixTree>)[group] ||
     radix) as RadixTree
-  const keys = Object.keys(tree).sort()
+  // A tree parsed from a file is already in order, so keys are only sorted
+  // when needed, which was most of the time it took to write a file. They're
+  // then added back in order, so the next map doesn't sort them again.
+  const keys = Object.keys(tree)
+  for (let i = 1; i < keys.length; i++) {
+    if (keys[i - 1]! > keys[i]!) {
+      keys.sort()
+      for (const key of keys) {
+        const value = tree[key]!
+        delete tree[key]
+        tree[key] = value
+      }
+      break
+    }
+  }
 
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i]!
@@ -177,21 +199,16 @@ Radix.map = function map(
     const recordValue = found[record]
 
     if (typeof recordValue !== "undefined") {
-      const result = cb(
-        recordValue as EncodedValue,
-        pre.join("") + key,
-        key,
-        pre,
-      )
+      const result = cb(recordValue as EncodedValue, prefix + key, key, pre)
       if (typeof result !== "undefined") return result
     } else if (opt) {
-      cb(undefined as never, pre.join(""), key, pre)
+      cb(undefined as never, prefix, key, pre)
     }
 
     const groupValue = found[group]
     if (isRadixTree(groupValue)) {
       pre.push(key)
-      const result = map(groupValue, cb, opt, pre)
+      const result = map(groupValue, cb, opt, pre, prefix + key)
       if (typeof result !== "undefined") return result
       pre.pop()
     }

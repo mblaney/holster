@@ -16,6 +16,11 @@ import type {HolsterAPI, AwaitableHolsterAPI} from "./holster.ts"
 
 type WireInterface = ReturnType<typeof Wire>
 
+// PBKDF2 iterations for passwords, as OWASP recommends for SHA-256.
+const passwordIterations = 600000
+// Auth records without iter were encrypted with this many iterations.
+const legacyIterations = 100000
+
 export interface UserInterface {
   is?: UserIdentity | null
   create: (
@@ -79,6 +84,24 @@ const User = (
   let creating = false
   let authing = false
   let retries = 0
+  // Souls being signed again, so a read while that happens doesn't repeat it.
+  const resigning = new Set<string>()
+
+  // Signs the user's own data again when it's read with signatures from before
+  // property signatures, which gives it a newer state as well.
+  wire.legacy(async data => {
+    for (const [soul, node] of Object.entries(data)) {
+      if (!user.is || node[utils.userPublicKey] !== user.is.pub) continue
+      if (resigning.has(soul)) continue
+
+      resigning.add(soul)
+      const signed = await SEA.signProperties(soul, node, user.is as never)
+      wire.put(signed, err => {
+        resigning.delete(soul)
+        if (err) console.log(`error signing ${soul} again: ${err}`)
+      })
+    }
+  })
 
   const auth = (
     username: string,
@@ -115,8 +138,10 @@ const User = (
         const authData = JSON.parse(data.auth as string) as {
           enc: {ct: string; iv: string; s: string}
           salt: string
+          iter?: number
         }
-        const work = await SEA.work(password, authData.salt)
+        const iter = authData.iter ?? legacyIterations
+        const work = await SEA.work(password, authData.salt, iter)
         const dec = (await SEA.decrypt(authData.enc, work)) as {
           priv: string
           epriv: string
@@ -130,26 +155,34 @@ const User = (
           priv: dec.priv,
           epriv: dec.epriv,
         }
-        if (newPassword !== "") {
+        // The private key is encrypted again for a new password, or when its
+        // record is from before the iterations were stored.
+        let updatePassword = newPassword
+        if (updatePassword === "" && !authData.iter) updatePassword = password
+        if (updatePassword !== "") {
           const salt = utils.text.random(64)
-          const newWork = await SEA.work(newPassword, salt)
+          const newWork = await SEA.work(
+            updatePassword,
+            salt,
+            passwordIterations,
+          )
           const enc = await SEA.encrypt(dec, newWork)
           const update = {
-            auth: JSON.stringify({enc: enc, salt: salt}),
+            auth: JSON.stringify({
+              enc: enc,
+              salt: salt,
+              iter: passwordIterations,
+            }),
           }
-          const timestamp = Date.now()
-          const sig = await SEA.signTimestamp(timestamp, user.is)
-          const graph = utils.graph(
-            pub,
-            update,
-            sig!,
-            data.pub as string,
-            timestamp,
-          )
+          const graph = await SEA.signProperties(pub, update, user.is as never)
           wire.put(graph, err => {
-            if (err) {
+            if (!err) {
+              done(null)
+            } else if (newPassword !== "") {
               done(`error putting ${JSON.stringify(update)} on ${pub}: ${err}`)
             } else {
+              // The old encryption still works, so the login does too.
+              console.log(`error updating auth on ${pub}: ${err}`)
               done(null)
             }
           })
@@ -221,7 +254,7 @@ const User = (
         }
 
         const salt = utils.text.random(64)
-        const work = await SEA.work(password, salt)
+        const work = await SEA.work(password, salt, passwordIterations)
         const pair = await SEA.pair()
         const priv = {priv: pair.priv, epriv: pair.epriv}
         const enc = await SEA.encrypt(priv, work)
@@ -229,13 +262,15 @@ const User = (
           username: username,
           pub: pair.pub,
           epub: pair.epub,
-          auth: JSON.stringify({enc: enc, salt: salt}),
+          auth: JSON.stringify({
+            enc: enc,
+            salt: salt,
+            iter: passwordIterations,
+          }),
         }
 
         const pub = "~" + pair.pub
-        const timestamp = Date.now()
-        const sig = await SEA.signTimestamp(timestamp, pair)
-        const graph = utils.graph(pub, data, sig!, pair.pub, timestamp)
+        const graph = await SEA.signProperties(pub, data, pair)
         wire.put(graph, err => {
           creating = false
           if (err) {
@@ -389,15 +424,11 @@ const User = (
         }
 
         const data = {username: null, pub: null, epub: null, auth: null}
-        const timestamp = Date.now()
-        const sig = await SEA.signTimestamp(timestamp, user.is!)
         const pub = "~" + user.is!.pub
-        const graph = utils.graph(
+        const graph = await SEA.signProperties(
           pub,
           data as never,
-          sig!,
-          user.is!.pub,
-          timestamp,
+          user.is as never,
         )
         wire.put(graph, err => {
           if (err) {

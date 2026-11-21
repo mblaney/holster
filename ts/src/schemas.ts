@@ -77,6 +77,7 @@ export type SignatureMap = z.infer<typeof SignatureMapSchema>
 export const GraphMetadataSchema = z.object({
   "#": SoulSchema,
   ">": StateVectorSchema,
+  // Each property's signature, keyed by property (see SEA.signProperties).
   s: SignatureMapSchema.optional(),
 })
 export type GraphMetadata = z.infer<typeof GraphMetadataSchema>
@@ -367,6 +368,8 @@ export const HamMixResultSchema = z.object({
   defer: GraphSchema,
   wait: z.number(),
   listeners: z.array(z.function()),
+  // Keys signed the way they were before property signatures, by soul.
+  legacy: z.record(SoulSchema, z.array(z.string())),
 })
 export type HamMixResult = z.infer<typeof HamMixResultSchema>
 
@@ -496,6 +499,7 @@ export type RadixFunction = {
     ) => unknown,
     opt?: boolean,
     pre?: string[],
+    prefix?: string,
   ) => unknown
 
   // Dynamic properties for internal state (e.g., group separator key)

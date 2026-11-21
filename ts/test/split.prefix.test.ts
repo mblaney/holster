@@ -1,10 +1,12 @@
 import {describe, test} from "node:test"
 import assert from "node:assert/strict"
 import Radisk from "../src/radisk.ts"
+import Radix from "../src/radix.ts"
 import type {
   RadiskInterface,
   RadiskOptions,
   EncodedValue,
+  RadixFunction,
 } from "../src/schemas.ts"
 
 // ASCII character for enquiry.
@@ -109,5 +111,99 @@ describe("split file with shared prefix", () => {
       )
       done()
     }, 10)
+  })
+})
+
+// Souls such as item0 to item199 share a long prefix, so each one starts
+// deep in the radix tree. Splits used to depend on that depth, so these
+// never split and the file grew without limit.
+describe("split souls that share a long prefix", () => {
+  const memoryStore = (
+    puts: Record<string, string>,
+  ): RadiskOptions["store"] => ({
+    get: (file: string, cb: (err?: string, data?: EncodedValue) => void) => {
+      cb(undefined, puts[file] as unknown as EncodedValue | undefined)
+    },
+    put: (
+      file: string,
+      data: string | EncodedValue | Record<string, unknown>,
+      cb: (err?: string) => void,
+    ) => {
+      puts[file] = data as unknown as string
+      cb(undefined)
+    },
+    list: (cb: (file?: string) => void) => {
+      Object.keys(puts).sort().forEach(cb)
+      cb()
+    },
+  })
+  const write = (radisk: RadiskInterface, key: string, value: EncodedValue) =>
+    new Promise(resolve => radisk(key, value, resolve))
+  const read = (radisk: RadiskInterface, key: string) =>
+    new Promise(resolve =>
+      radisk(key, (err?: string | null, value?: unknown) => resolve(value)),
+    )
+  const props = ["title", "body", "n"]
+
+  test("splits into files, keeping each soul's properties together", async () => {
+    const puts: Record<string, string> = {}
+    const radisk: RadiskInterface = Radisk({
+      size: 2000,
+      cache: false,
+      store: memoryStore(puts),
+    })
+    const writes: Promise<unknown>[] = []
+    for (let i = 0; i < 200; i++) {
+      for (const prop of props) {
+        writes.push(write(radisk, `item${i}${enq}${prop}`, [`${prop} ${i}`, 1]))
+      }
+    }
+    await Promise.all(writes)
+
+    const files = Object.keys(puts)
+    assert.ok(files.length > 5, `wrote ${files.length} files`)
+    for (const file of files) {
+      assert.ok(puts[file]!.length <= 2000, `${file} is ${puts[file]!.length}`)
+    }
+    // A soul's properties are never in two files. Files store keys as shared
+    // prefixes, so each one is parsed to find the souls it holds.
+    const fileOf = new Map<string, string>()
+    for (const file of files) {
+      const disk = await new Promise<RadixFunction | undefined>(resolve =>
+        radisk.parse(file, (err, disk) => resolve(disk)),
+      )
+      Radix.map(disk!, (value: EncodedValue, key: string) => {
+        const soul = key.split(enq)[0]!
+        const owner = fileOf.get(soul)
+        assert.ok(!owner || owner === file, `${soul} is in two files`)
+        fileOf.set(soul, file)
+      })
+    }
+    assert.equal(fileOf.size, 200)
+    for (let i = 0; i < 200; i++) {
+      for (const prop of props) {
+        assert.deepEqual(await read(radisk, `item${i}${enq}${prop}`), [
+          `${prop} ${i}`,
+          1,
+        ])
+      }
+    }
+  })
+
+  test("keeps one soul with many properties in one file", async () => {
+    const puts: Record<string, string> = {}
+    const radisk: RadiskInterface = Radisk({
+      size: 2000,
+      cache: false,
+      store: memoryStore(puts),
+    })
+    const writes: Promise<unknown>[] = []
+    for (let i = 0; i < 200; i++) {
+      writes.push(write(radisk, `item${enq}p${i}`, [`value ${i}`, 1]))
+    }
+    await Promise.all(writes)
+
+    assert.deepEqual(Object.keys(puts), ["!"])
+    assert.deepEqual(await read(radisk, `item${enq}p199`), ["value 199", 1])
   })
 })

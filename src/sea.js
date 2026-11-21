@@ -1,6 +1,51 @@
-import {userPublicKey, userSignature} from "./utils.js"
+import {graph, userPublicKey, userSignature} from "./utils.js"
 import * as utils from "./sea-utils.js"
 import SafeBuffer from "./buffer.js"
+
+const curve = {name: "ECDSA", namedCurve: "P-256"}
+const ecdsa = {name: "ECDSA", hash: {name: "SHA-256"}}
+
+// Keys are imported once and used for every signature of a node.
+const signingKey = pair =>
+  utils.subtle.importKey("jwk", utils.jwk(pair.pub, pair.priv), curve, false, [
+    "sign",
+  ])
+const verifyingKey = publicKey =>
+  utils.subtle.importKey("jwk", utils.jwk(publicKey), curve, false, ["verify"])
+
+// Signs text itself as an ECDSA signature, in base64. SEA.sign signs the
+// SHA-256 hash of its message instead, so it can't make a signature that
+// signText would.
+const signText = async (text, key) => {
+  const data = new TextEncoder().encode(text)
+  const sig = await utils.subtle.sign(ecdsa, key, data)
+  return SafeBuffer.from(sig, "binary").toString("base64")
+}
+
+// Checks a signature of bytes.
+const verifyBytes = async (data, signature, key) => {
+  try {
+    const sig = new Uint8Array(SafeBuffer.from(signature, "base64"))
+    return await utils.subtle.verify(ecdsa, key, sig, data)
+  } catch (err) {
+    console.log(`error verifying signature: ${err.message}`)
+    return false
+  }
+}
+
+// Checks a signature from signText.
+const verifyText = (text, signature, key) =>
+  verifyBytes(new TextEncoder().encode(text), signature, key)
+
+// Checks a signature of the SHA-256 hash of text, the way timestamps were
+// signed before property signatures.
+const verifyHash = async (text, signature, key) =>
+  verifyBytes(new Uint8Array(await utils.sha256(text)), signature, key)
+
+// What a property's signature covers, so it can't be used for any other soul,
+// key, value or state.
+const propertyText = (soul, key, value, state) =>
+  JSON.stringify([soul, key, value, state])
 
 // Security, Encryption, and Authorization: SEA.js from GunDB.
 const SEA = {
@@ -172,78 +217,86 @@ const SEA = {
     if (cb) cb(signed)
     return signed
   },
-  // Sign a timestamp to prove ownership of an update
-  signTimestamp: async (timestamp, pair, cb) => {
-    if (!pair || !pair.pub || !pair.priv) {
-      if (cb) cb(null)
-      return null
-    }
-
-    // Convert timestamp to string for consistent hashing
-    const timestampStr = timestamp.toString()
-    const hash = await utils.sha256(timestampStr)
-    const jwk = utils.jwk(pair.pub, pair.priv)
-    const alg = {name: "ECDSA", namedCurve: "P-256"}
-
-    const sig = await utils.subtle
-      .importKey("jwk", jwk, alg, false, ["sign"])
-      .then(key =>
-        utils.subtle.sign(
-          {name: "ECDSA", hash: {name: "SHA-256"}},
-          key,
-          new Uint8Array(hash),
-        ),
-      )
-
-    const signature = SafeBuffer.from(sig, "binary").toString("base64")
-
-    if (cb) cb(signature)
-    return signature
-  },
-  // Verify a timestamp signature to confirm ownership of update
+  // Before property signatures, an update was signed by signing its timestamp,
+  // which vouches for anything claiming that timestamp. Data signed then still
+  // has to verify until its owner writes it again.
   verifyTimestamp: async (timestamp, signature, publicKey, cb) => {
     if (!publicKey || !timestamp || !signature) {
       if (cb) cb(false)
       return false
     }
 
+    let isValid = false
     try {
-      // Convert timestamp to string for consistent hashing
-      const timestampStr = timestamp.toString()
-      const hash = await utils.sha256(timestampStr)
-
-      const key = await utils.subtle.importKey(
-        "jwk",
-        utils.jwk(publicKey),
-        {name: "ECDSA", namedCurve: "P-256"},
-        false,
-        ["verify"],
-      )
-
-      const sig = new Uint8Array(SafeBuffer.from(signature, "base64"))
-      const alg = {name: "ECDSA", hash: {name: "SHA-256"}}
-
-      const isValid = await utils.subtle.verify(
-        alg,
-        key,
-        sig,
-        new Uint8Array(hash),
-      )
-
-      if (cb) cb(isValid)
-      return isValid
+      const key = await verifyingKey(publicKey)
+      isValid = await verifyHash(timestamp.toString(), signature, key)
     } catch (err) {
-      console.log(`error verifying timestamp signature: ${err.message}`)
-      if (cb) cb(false)
-      return false
+      console.log(`error importing public key: ${err.message}`)
     }
+    if (cb) cb(isValid)
+    return isValid
   },
-  work: async (data, salt, cb) => {
+  // Returns a graph for soul with data and the public key property that marks
+  // it as user data, each property signed by pair. A signature in _.s only
+  // verifies for its soul, key, value and state.
+  signProperties: async (soul, data, pair) => {
+    const timestamp = Date.now()
+    const g = graph(soul, data, timestamp)
+    const node = g[soul]
+    node[userPublicKey] = pair.pub
+    node._[">"][userPublicKey] = timestamp
+    node._.s = {}
+    const key = await signingKey(pair)
+    await Promise.all(
+      Object.keys(node)
+        .filter(k => k !== "_")
+        .map(async k => {
+          const text = propertyText(soul, k, node[k], timestamp)
+          node._.s[k] = await signText(text, key)
+        }),
+    )
+    return g
+  },
+  // Maps the keys of node whose signatures in _.s verify against publicKey to
+  // whether they're from before property signatures, which is only checked
+  // when legacy is true (see verifyTimestamp).
+  verifyProperties: async (soul, node, keys, publicKey, legacy = true) => {
+    const verified = new Map()
+    if (!publicKey || !node._.s || keys.length === 0) return verified
+
+    let key
+    try {
+      key = await verifyingKey(publicKey)
+    } catch (err) {
+      console.log(`error importing public key: ${err.message}`)
+      return verified
+    }
+
+    await Promise.all(
+      keys.map(async k => {
+        const sig = node._.s[k]
+        const state = node._[">"][k]
+        const text = propertyText(soul, k, node[k], state)
+        if (await verifyText(text, sig, key)) {
+          verified.set(k, false)
+        } else if (legacy && (await verifyHash(state.toString(), sig, key))) {
+          verified.set(k, true)
+        }
+      }),
+    )
+    return verified
+  },
+  work: async (data, salt, iterations, cb) => {
     if (typeof salt === "function") {
       cb = salt
       salt = undefined
     }
+    if (typeof iterations === "function") {
+      cb = iterations
+      iterations = undefined
+    }
     if (typeof salt === "undefined") salt = utils.random(9)
+    if (typeof iterations === "undefined") iterations = 100000
 
     const key = await utils.subtle.importKey(
       "raw",
@@ -254,7 +307,7 @@ const SEA = {
     )
     const alg = {
       name: "PBKDF2",
-      iterations: 100000,
+      iterations,
       salt: new TextEncoder().encode(salt),
       hash: {name: "SHA-256"},
     }

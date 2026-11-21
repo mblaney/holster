@@ -19,6 +19,9 @@ const etx = String.fromCharCode(3)
 const enq = String.fromCharCode(5)
 // ASCII character for unit separator
 const unit = String.fromCharCode(31)
+// ASCII characters for group and record separators, used in radix trees.
+const group = String.fromCharCode(29)
+const record = String.fromCharCode(30)
 
 export interface RadiskInterface extends RadixFunction {
   // Override call signature to support both get (with callback) and put (with value and optional callback)
@@ -91,7 +94,7 @@ const Radisk = (opt: RadiskOptions) => {
 
   const options = {
     log: opt.log || console.log,
-    batch: opt.batch || 100,
+    batch: opt.batch || 10000,
     write: opt.write || 1,
     size: opt.size || 1024 * 1024,
     memoryLimit: opt.memoryLimit || 500,
@@ -207,7 +210,10 @@ const Radisk = (opt: RadiskOptions) => {
       return radisk.thrash()
     }
 
-    clearTimeout(radisk.batch.timeout)
+    // The timer isn't reset by later writes, so a steady stream of them can't
+    // hold the batch back.
+    if (radisk.batch.timeout) return undefined
+
     radisk.batch.timeout = setTimeout(radisk.thrash, options.write)
     return undefined
   }) as unknown as RadiskInterface
@@ -288,7 +294,9 @@ const Radisk = (opt: RadiskOptions) => {
           const disk = cache.get(file)!
           Radix.map(rad, (value, key) => {
             if (key < start) return undefined
-            if (end && end < key) {
+            // A key equal to the next file's name belongs in that file, as
+            // radisk.read and radisk.write's splits both expect.
+            if (end && end <= key) {
               save.start = key
               return true
             }
@@ -301,7 +309,7 @@ const Radisk = (opt: RadiskOptions) => {
             if (err) return cb(err)
             Radix.map(rad, (value, key) => {
               if (key < start) return undefined
-              if (end && end < key) {
+              if (end && end <= key) {
                 save.start = key
                 return true
               }
@@ -359,20 +367,29 @@ const Radisk = (opt: RadiskOptions) => {
       sub: undefined as RadixFunction | undefined,
       halfKey: "", // soul ID at the ~options.size/2 mark for a balanced split
       halfOffset: 0, // write.text.length before that entry
+      soul: null as string | null, // the previous entry's soul
       each: (
         value: EncodedValue,
-        _key: string,
+        key: string,
         k: string,
         pre: string[],
       ): void | boolean => {
         if (write.done) return
         write.count++
+        // Radix.map's key only includes k for entries that have a value.
+        const fullKey = typeof value === "undefined" ? key + k : key
         const valueStr =
           typeof value === "undefined" ? "" : "=" + Radisk.encode(value)
-        const enc =
-          Radisk.encode(pre.length) + "#" + Radisk.encode(k) + valueStr + "\n"
-        const validBoundary =
-          pre.length === 0 || (pre.length === 1 && k.includes(enq))
+        const enc = depth(pre.length) + "#" + Radisk.encode(k) + valueStr + "\n"
+        // A file can only be split where one soul ends and the next begins,
+        // so a soul's properties all stay in the same file. That's found by
+        // comparing souls rather than radix depth, since souls that share a
+        // prefix, such as item1 and item2, start deep in the tree and would
+        // otherwise never be split.
+        const soulEnd = fullKey.indexOf(enq)
+        const soul = soulEnd === -1 ? fullKey : fullKey.substring(0, soulEnd)
+        const validBoundary = soul !== write.soul
+        write.soul = soul
 
         // Record the first valid split boundary past the halfway mark so a
         // full overflow can split here instead of at the tail, keeping both
@@ -383,9 +400,7 @@ const Radisk = (opt: RadiskOptions) => {
           write.text.length > options.size / 2 &&
           validBoundary
         ) {
-          const fullKey = pre.join("") + k
-          const endIdx = fullKey.indexOf(enq)
-          write.halfKey = endIdx === -1 ? fullKey : fullKey.substring(0, endIdx)
+          write.halfKey = soul
           write.halfOffset = write.text.length
         }
 
@@ -394,11 +409,7 @@ const Radisk = (opt: RadiskOptions) => {
           write.text.length + enc.length > options.size &&
           validBoundary
         ) {
-          const fullKey = pre.join("") + k
-          const endIdx = fullKey.indexOf(enq)
-          write.limit =
-            write.halfKey ||
-            (endIdx === -1 ? fullKey : fullKey.substring(0, endIdx))
+          write.limit = write.halfKey || soul
           if (write.limit !== file) {
             // Truncate to the balanced split point — text after halfOffset is
             // handled by the write.slice call below, which reads from rad.
@@ -526,12 +537,16 @@ const Radisk = (opt: RadiskOptions) => {
         if (err) return cb(err)
         if (!data) return cb(null, parse.disk)
 
-        let pre: string[] = []
-        let preString = ""
+        // The file is the radix tree written out in order, each key with its
+        // depth, so the tree is rebuilt by adding each key to its parent
+        // rather than inserting full keys from the top. nodes holds the
+        // current node at each depth.
+        type Node = Record<string, unknown>
+        const root = parse.disk() as unknown as Record<string, Node>
+        const nodes: Node[] = []
         let tmp = parse.split(data as string)
         while (tmp) {
-          let key: string | undefined
-          let value: EncodedValue | undefined
+          let node: Node | undefined
           const tmpVal = tmp[1]
           const i =
             typeof tmpVal === "number"
@@ -541,26 +556,21 @@ const Radisk = (opt: RadiskOptions) => {
                 : 0
           tmp = parse.split(tmp[2]) || ("" as never)
           if (tmp[0] === "#") {
-            const tmpKey = tmp[1]
-            key = typeof tmpKey === "string" ? tmpKey : String(tmpKey)
-            if (i < pre.length) {
-              pre.length = i
+            const key = String(tmp[1])
+            const parent = i === 0 ? root : nodes[i - 1]
+            if (parent) {
+              const tree = (
+                i === 0 ? root : (parent[group] ??= Radix.tree())
+              ) as Record<string, Node>
+              node = Object.hasOwn(tree, key) ? tree[key] : (tree[key] = {})
+              nodes[i] = node!
+              nodes.length = i + 1
             }
-            if (i <= pre.length) {
-              pre[i] = key
-              pre.length = i + 1
-            }
-            preString = pre.join("")
           }
           tmp = parse.split(tmp[2]) || ("" as never)
           if (tmp[0] === "\n") continue
 
-          if (tmp[0] === "=") {
-            value = tmp[1] as EncodedValue
-          }
-          if (typeof key !== "undefined" && typeof value !== "undefined") {
-            parse.disk(preString, value)
-          }
+          if (tmp[0] === "=" && node) node[record] = tmp[1]
           tmp = parse.split(tmp[2])
         }
         cb(null, parse.disk)
@@ -572,7 +582,7 @@ const Radisk = (opt: RadiskOptions) => {
         if (i === -1) return undefined
 
         const a = data.slice(0, i)
-        const o: {i?: number} = {}
+        const o: {i?: number; key?: boolean} = {key: a === "#"}
         return [a, Radisk.decode(data.slice(i), o), data.slice(i + o.i!)]
       },
     }
@@ -582,6 +592,10 @@ const Radisk = (opt: RadiskOptions) => {
   // TypeScript can't verify all properties are added dynamically, but they are at runtime
   return radisk as unknown as RadiskInterface
 }
+
+// Encoded radix depths, which start every line of a file.
+const depths: string[] = []
+const depth = (n: number): string => depths[n] || (depths[n] = Radisk.encode(n))
 
 /**
  * Encode value for storage
@@ -604,11 +618,10 @@ Radisk.encode = (input: EncodedValue | GraphValue): string => {
   }
 
   if (typeof data === "string") {
-    let i = 0
-    let current: string | undefined = undefined
+    // One more unit separator at the start for each one in the string.
     let text = unit
-    while ((current = data[i++])) {
-      if (current === unit) text += unit
+    for (let i = data.indexOf(unit); i !== -1; i = data.indexOf(unit, i + 1)) {
+      text += unit
     }
     return text + '"' + data + state + sig + unit
   }
@@ -632,41 +645,33 @@ Radisk.encode = (input: EncodedValue | GraphValue): string => {
  */
 Radisk.decode = (
   data: string,
-  obj?: {i?: number},
+  obj?: {i?: number; key?: boolean},
 ): EncodedValue | GraphValue | Relation | null | undefined => {
-  let i = -1
-  let n = 0
-  let current: string | undefined = undefined
-  let previous: string | undefined = undefined
-  let textStart = -1
-  let textEnd = -1
   if (data[0] !== unit) return undefined
 
-  while ((current = data[++i])) {
-    if (previous) {
-      if (textStart === -1) textStart = i
-      if (current === unit) {
-        if (--n <= 0) {
-          textEnd = i
-          break
-        }
-      }
-    } else if (current === unit) {
-      n++
-    } else {
-      previous = current || "true"
-    }
+  // n unit separators come before the type character, and the text ends at
+  // the nth unit separator after it.
+  let n = 0
+  while (data[n] === unit) n++
+  const previous = data[n]
+  let textEnd = n
+  for (let k = 0; k < n && textEnd !== -1; k++) {
+    textEnd = data.indexOf(unit, textEnd + 1)
   }
+  if (textEnd === -1) textEnd = data.length
+  const text = data.slice(n + 1, textEnd)
 
-  const text =
-    textStart !== -1 ? data.slice(textStart, textEnd !== -1 ? textEnd : i) : ""
+  if (obj) obj.i = textEnd + 1
 
-  if (obj) obj.i = i + 1
-
-  const parts = text.split(etx)
-  const value = parts[0]!
-  const state = parts[1]
-  const sig = parts[2]
+  // Keys don't have a state. A value's state and signature are taken from the
+  // end, so the value can contain etx. A signature is never a number.
+  const parts = obj?.key ? [text] : text.split(etx)
+  const sig =
+    parts.length > 2 && Number.isNaN(Number(parts[parts.length - 1]))
+      ? parts.pop()
+      : undefined
+  const state = parts.length > 1 ? parts.pop() : undefined
+  const value = parts.join(etx)
 
   if (!state) {
     if (previous === '"') return text

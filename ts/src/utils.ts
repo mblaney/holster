@@ -52,6 +52,15 @@ export const obj = {
   },
 
   /**
+   * Returns o[key] only when o has key itself, so a key such as constructor
+   * isn't matched by a property every object inherits.
+   */
+  own: <T>(
+    o: Record<string, T> | null | undefined,
+    key: string,
+  ): T | undefined => (o && Object.hasOwn(o, key) ? o[key] : undefined),
+
+  /**
    * Map over object keys with early return support
    */
   map: <T, R>(
@@ -166,16 +175,14 @@ export const userPublicKey = "_holster_user_public_key"
 // ============================================================================
 
 /**
- * Create a graph from soul and data with optional signature metadata
+ * Create a graph from soul and data, with every property given the same
+ * state. User data is signed with SEA.signProperties instead.
  */
 export const graph = (
   soul: Soul,
   data: Record<string, GraphValue>,
-  sig?: string,
-  pub?: string,
-  timestamp?: number,
+  timestamp = Date.now(),
 ): Graph => {
-  const ts = timestamp || Date.now()
   const stateVector: Record<string, number> = {}
   const node: GraphNode = {
     _: {"#": soul, ">": stateVector},
@@ -184,17 +191,8 @@ export const graph = (
   for (const [key, value] of Object.entries(data)) {
     if (key !== "_" && key !== userPublicKey && key !== userSignature) {
       node[key] = value
-      stateVector[key] = ts
+      stateVector[key] = timestamp
     }
-  }
-
-  if (sig && pub && timestamp) {
-    if (!node._["s"]) {
-      node._["s"] = {}
-    }
-    node._["s"][timestamp.toString()] = sig
-    node[userPublicKey] = pub
-    stateVector[userPublicKey] = timestamp
   }
 
   return {[soul]: node}

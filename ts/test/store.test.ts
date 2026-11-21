@@ -1,6 +1,6 @@
 import {describe, test} from "node:test"
 import assert from "node:assert/strict"
-import Store from "../src/store.ts"
+import Store, {encodeName, decodeName} from "../src/store.ts"
 import type {Graph, Lex, StoreInterface} from "../src/schemas.ts"
 import fs from "fs"
 
@@ -369,5 +369,112 @@ describe("store", () => {
         )
       },
     )
+  })
+
+  test("get properties that aren't stored yet", (t, done) => {
+    const missing: StoreInterface = Store({file: "test/missing-ts"})
+    const graph: Graph = {
+      root: {
+        _: {"#": "root", ">": {small10: 1, small11: 1}},
+        small10: {"#": "a"},
+        small11: {"#": "b"},
+      },
+      "0other": {
+        _: {"#": "0other", ">": {body: 1}},
+        body: "another record",
+      },
+    }
+    missing.put(graph, (err: string | null | undefined) => {
+      assert.equal(err, null)
+      // Longer than a stored property, so radix used to look past small10.
+      missing.get(
+        {"#": "root", ".": "small100"},
+        (err: string | null | undefined, value: Graph | undefined) => {
+          assert.equal(err, null)
+          assert.deepEqual(value, {root: undefined})
+          // A prefix of stored properties, so radix finds their group,
+          // which used to be stored as if it were this property's value.
+          missing.get(
+            {"#": "root", ".": "small1"},
+            (err: string | null | undefined, value: Graph | undefined) => {
+              assert.equal(err, null)
+              assert.deepEqual(value, {root: undefined})
+              fs.rm(
+                "test/missing-ts",
+                {recursive: true, force: true},
+                (err: NodeJS.ErrnoException | null) => {
+                  assert.equal(err, null)
+                  done()
+                },
+              )
+            },
+          )
+        },
+      )
+    })
+  })
+})
+
+describe("store file names", () => {
+  // Files are named after souls when they're split, so these souls end up
+  // as file names.
+  const souls = [
+    "-1",
+    "-2",
+    "../escaped",
+    "./dot",
+    ".",
+    "..",
+    "b/one",
+    "c\x05d",
+  ]
+
+  test("encode and decode names", () => {
+    for (const name of [...souls, "!", "100%", "a%2Fb", "x.", "x ", "a<b>"]) {
+      const encoded = encodeName(name)
+      assert.ok(!/[/\\\x00-\x1F]/.test(encoded), `${name} is encoded`)
+      assert.ok(encoded !== "." && encoded !== "..", `${name} is encoded`)
+      assert.equal(decodeName(encoded), name)
+    }
+  })
+
+  test("put and get souls that would be unsafe file names", (t, done) => {
+    // Small enough that each soul is split into a file of its own.
+    const names: StoreInterface = Store({
+      file: "test/names-ts",
+      size: 60,
+    } as any)
+    const graph: Graph = {}
+    for (const soul of souls) {
+      graph[soul] = {_: {"#": soul, ">": {value: 1}}, value: `${soul} value`}
+    }
+    names.put(graph, err => {
+      assert.equal(err, null)
+      const files = fs.readdirSync("test/names-ts")
+      for (const file of [
+        "..%2Fescaped",
+        ".%2Fdot",
+        "%2E",
+        "%2E%2E",
+        "b%2Fone",
+      ]) {
+        assert.ok(files.includes(file), `${file} in ${files}`)
+      }
+      // The file named after ../escaped used to be written here.
+      assert.ok(!fs.existsSync("test/escaped"))
+      let count = 0
+      for (const soul of souls) {
+        names.get({"#": soul}, (err, value) => {
+          assert.equal(err, null)
+          assert.equal((value as Graph)[soul]!.value, `${soul} value`, soul)
+          if (++count < souls.length) return
+
+          fs.rm("test/names-ts", {recursive: true, force: true}, err => {
+            assert.equal(err, null)
+            done()
+          })
+        })
+      }
+    })
   })
 })
