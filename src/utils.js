@@ -16,10 +16,13 @@ export const num = {
 export const obj = {
   is: o => {
     if (!o || typeof o !== "object") return false
+    // Most objects pass here, before the slower check for one with no
+    // prototype.
+    if (o.constructor === Object) return true
 
     const toString = Object.prototype.toString.call(o)
     const match = toString.match(/^\[object (\w+)\]$/)
-    return o.constructor === Object || (match && match[1] === "Object")
+    return !!match && match[1] === "Object"
   },
   // Returns o[key] only when o has key itself, so a key such as constructor
   // isn't matched by a property every object inherits.
@@ -81,8 +84,7 @@ export const rel = {
 export const userSignature = "_holster_user_signature"
 export const userPublicKey = "_holster_user_public_key"
 
-// graph converts objects to graph format, with every property given the same
-// state. User data is signed with SEA.signProperties instead.
+// Converts objects to graph format, with every property given the same state.
 export const graph = (soul, data, timestamp = Date.now()) => {
   const g = {[soul]: {_: {"#": soul, ">": {}}}}
 

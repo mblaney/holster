@@ -73,13 +73,13 @@ Ham.mix = async (
   maxGraphSize = MAX_GRAPH_SIZE,
   legacy = true,
 ): Promise<HamMixResult> => {
-  if (!change || typeof change !== "object") {
+  if (!utils.obj.is(change)) {
     throw new TypeError("change must be an object")
   }
-  if (!graph || typeof graph !== "object") {
+  if (!utils.obj.is(graph)) {
     throw new TypeError("graph must be an object")
   }
-  if (!listen || typeof listen !== "object") {
+  if (!utils.obj.is(listen)) {
     throw new TypeError("listen must be an object")
   }
 

@@ -1,10 +1,10 @@
 import {match, obj, userPublicKey} from "./utils.js"
 
 const Get = (lex, graph, fast) => {
-  if (!lex || typeof lex !== "object") {
+  if (!obj.is(lex)) {
     throw new TypeError("lex must be an object")
   }
-  if (!graph || typeof graph !== "object") {
+  if (!obj.is(graph)) {
     throw new TypeError("graph must be an object")
   }
 
@@ -17,7 +17,7 @@ const Get = (lex, graph, fast) => {
 
   const node = {_: {"#": soul, ">": {}}}
   const signatures = {}
-  // Copies a property with its state and signature (see SEA.signProperties).
+  // Copies a property with its state and signature.
   const copy = key => {
     node[key] = graph[soul][key]
     node._[">"][key] = graph[soul]._[">"][key]

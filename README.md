@@ -43,7 +43,7 @@ and examples.
 To run a Holster relay, create a `relay.js` file with:
 
 ```
-import Holster from "@mblaney/holster/src/holster.js"
+import Holster from "@mblaney/holster"
 Holster({port: 8765})
 ```
 
@@ -69,7 +69,7 @@ To allow connections via a web server and to enable secure WebSockets see
 Clients then connect by passing the relay's address as a peer:
 
 ```
-import Holster from "@mblaney/holster/src/holster.js"
+import Holster from "@mblaney/holster"
 Holster("wss://your-relay-host")
 ```
 

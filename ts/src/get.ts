@@ -14,10 +14,10 @@ import type {GraphNode} from "./schemas.ts"
  * @param fast - If true, return current data; if false, return undefined to trigger store lookup
  */
 const Get = (lex: Lex, graph: Graph, fast?: boolean): Graph | undefined => {
-  if (!lex || typeof lex !== "object") {
+  if (!obj.is(lex)) {
     throw new TypeError("lex must be an object")
   }
-  if (!graph || typeof graph !== "object") {
+  if (!obj.is(graph)) {
     throw new TypeError("graph must be an object")
   }
 

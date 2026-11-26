@@ -469,7 +469,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
     const put: Graph = {}
     for (const [soul, node] of Object.entries(msg.put)) {
       const current = utils.obj.own(graph, soul)
-      if (!node || typeof node !== "object" || !current) {
+      if (!utils.obj.is(node) || !current) {
         put[soul] = null as never
         continue
       }
@@ -807,7 +807,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
         }
 
         for (const [_soul, node] of Object.entries(update.now)) {
-          if (node && typeof node === "object") {
+          if (utils.obj.is(node)) {
             for (const [_key, value] of Object.entries(node)) {
               const soulId = utils.rel.is(value as GraphValue)
               if (soulId) {
@@ -1269,11 +1269,7 @@ const Wire = (opt: HolsterOptions): WireAPI => {
           for (const [soul, node] of Object.entries(msg.put)) {
             const known = await hasSoul(soul)
             hasSoulMap.set(soul, known)
-            if (
-              (!known && !pendingReferences.has(soul)) ||
-              !node ||
-              typeof node !== "object"
-            )
+            if ((!known && !pendingReferences.has(soul)) || !utils.obj.is(node))
               continue
             for (const [, value] of Object.entries(node)) {
               const soulId = utils.rel.is(value as GraphValue)
