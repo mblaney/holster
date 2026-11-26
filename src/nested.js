@@ -1,3 +1,5 @@
+import {obj} from "./utils.js"
+
 // Backs on(cb, _get, {nested: true}) - see holster.js. A plain on() only
 // resolves the node it's given; it never re-checks a child whose own
 // value is an object (which always has its own soul, since only scalars
@@ -29,28 +31,37 @@ export function attachNested(chain, cb, _get, _opt) {
 
   const notify = () => cb(latest === null ? null : {...latest})
 
+  const stopChild = key => {
+    const {api: childApi, handler} = childListeners.get(key)
+    childApi.off(handler)
+    childListeners.delete(key)
+  }
+
   const topLevelHandler = data => {
-    if (data === null || typeof data !== "object") {
+    if (!obj.is(data)) {
       latest = data
       notify()
       return
     }
 
-    if (!latest || typeof latest !== "object") latest = {}
+    if (!obj.is(latest)) latest = {}
     for (const [key, value] of Object.entries(data)) {
       if (key === "_") continue
       latest[key] = value
 
-      if (
-        value !== null &&
-        typeof value === "object" &&
-        !childListeners.has(key)
-      ) {
+      const isObject = obj.is(value)
+      // A child that's removed only has its fields cleared, so its own
+      // listener never sees it go. It's stopped here instead, so a new
+      // value for key gets a listener on its own node.
+      if (!isObject && childListeners.has(key)) stopChild(key)
+      if (isObject && !childListeners.has(key)) {
         const childApi = chain().next(key)
         const handler = childData => {
+          // An update already on its way when this was stopped.
+          if (childListeners.get(key)?.handler !== handler) return
           if (childData === null) {
+            stopChild(key)
             delete latest[key]
-            childListeners.delete(key)
           } else {
             latest[key] = childData
           }
@@ -66,9 +77,7 @@ export function attachNested(chain, cb, _get, _opt) {
 
     for (const key of [...childListeners.keys()]) {
       if (!(key in data)) {
-        const {api: childApi, handler} = childListeners.get(key)
-        childApi.off(handler)
-        childListeners.delete(key)
+        stopChild(key)
         delete latest[key]
       }
     }

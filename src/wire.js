@@ -395,7 +395,7 @@ const Wire = opt => {
     const put = {}
     for (const [soul, node] of Object.entries(msg.put)) {
       const current = utils.obj.own(graph, soul)
-      if (!node || typeof node !== "object" || !current) {
+      if (!utils.obj.is(node) || !current) {
         put[soul] = null
         continue
       }
@@ -737,7 +737,7 @@ const Wire = opt => {
 
         // Seed pendingReferences with any new references from API calls
         for (const [soul, node] of Object.entries(update.now)) {
-          if (node && typeof node === "object") {
+          if (utils.obj.is(node)) {
             for (const [key, value] of Object.entries(node)) {
               const soulId = utils.rel.is(value)
               if (soulId) {
@@ -1206,11 +1206,7 @@ const Wire = opt => {
           for (const [soul, node] of Object.entries(msg.put)) {
             const known = await hasSoul(soul)
             hasSoulMap.set(soul, known)
-            if (
-              (!known && !pendingReferences.has(soul)) ||
-              !node ||
-              typeof node !== "object"
-            )
+            if ((!known && !pendingReferences.has(soul)) || !utils.obj.is(node))
               continue
             for (const [, value] of Object.entries(node)) {
               const soulId = utils.rel.is(value)

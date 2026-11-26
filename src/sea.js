@@ -148,13 +148,14 @@ const SEA = {
     }
 
     const signed = utils.parse(data)
-    const key = await utils.subtle.importKey(
-      "jwk",
-      utils.jwk(pair.pub),
-      {name: "ECDSA", namedCurve: "P-256"},
-      false,
-      ["verify"],
-    )
+    let key
+    try {
+      key = await verifyingKey(pair.pub)
+    } catch (err) {
+      console.log(`error importing public key: ${err.message}`)
+      if (cb) cb(null)
+      return null
+    }
 
     let msg = {}
     if (typeof signed.m === "string") {
@@ -168,10 +169,7 @@ const SEA = {
         }
       }
     }
-    const hash = await utils.sha256(msg)
-    const sig = new Uint8Array(SafeBuffer.from(signed.s, "base64"))
-    const alg = {name: "ECDSA", hash: {name: "SHA-256"}}
-    if (await utils.subtle.verify(alg, key, sig, new Uint8Array(hash))) {
+    if (await verifyHash(utils.stringify(msg), signed.s, key)) {
       const verified = utils.parse(signed.m)
       if (cb) cb(verified)
       return verified
@@ -197,18 +195,11 @@ const SEA = {
         }
       }
     }
+    // The hash of msg is signed rather than msg itself, so a signature from
+    // sign can't be used as a property signature (see signText).
     const hash = await utils.sha256(msg)
-    const jwk = utils.jwk(pair.pub, pair.priv)
-    const alg = {name: "ECDSA", namedCurve: "P-256"}
-    const sig = await utils.subtle
-      .importKey("jwk", jwk, alg, false, ["sign"])
-      .then(key =>
-        utils.subtle.sign(
-          {name: "ECDSA", hash: {name: "SHA-256"}},
-          key,
-          new Uint8Array(hash),
-        ),
-      )
+    const key = await signingKey(pair)
+    const sig = await utils.subtle.sign(ecdsa, key, new Uint8Array(hash))
     const signed = {
       m: msg,
       s: SafeBuffer.from(sig, "binary").toString("base64"),

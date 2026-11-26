@@ -43,12 +43,12 @@ export const obj = {
    */
   is: (o: unknown): o is PlainObject => {
     if (!o || typeof o !== "object") return false
+    // Most objects pass here, before the slower check for one with no
+    // prototype.
+    if ((o as Record<string, unknown>).constructor === Object) return true
     const toString = Object.prototype.toString.call(o)
     const match = toString.match(/^\[object (\w+)\]$/)
-    return (
-      (o as Record<string, unknown>).constructor === Object ||
-      (match !== null && match[1] === "Object")
-    )
+    return match !== null && match[1] === "Object"
   },
 
   /**

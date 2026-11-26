@@ -210,6 +210,43 @@ describe("holster.on nested", () => {
     assert.equal(last.b.ct, "1")
   })
 
+  test("still sees a child's updates after it's set to null and back", async t => {
+    const put = (value: Record<string, string> | null) =>
+      new Promise<void>(resolve => {
+        serverUser
+          .get("shared")
+          .next("nested5")
+          .next("a")
+          .put(value, resolve as never)
+      })
+    await put({name: "one", type: "file"})
+
+    const events: Record<string, {name: string; type: string}>[] = []
+    const cb = (data: unknown) =>
+      events.push(data as Record<string, {name: string; type: string}>)
+    clientUser
+      .get([host, "shared"])
+      .next("nested5")
+      .on(cb, true, {nested: true})
+    t.after(() => {
+      clientUser.get([host, "shared"]).next("nested5").off(cb)
+    })
+    await new Promise(r => setTimeout(r, 200))
+
+    await put(null)
+    await new Promise(r => setTimeout(r, 300))
+    await put({name: "one", type: "file"})
+    await new Promise(r => setTimeout(r, 300))
+    // A later change to the child, which a listener left on its old node
+    // never hears about.
+    await put({name: "two"})
+    await new Promise(r => setTimeout(r, 300))
+
+    const last = events[events.length - 1]!
+    assert.equal(last.a!.name, "two")
+    assert.equal(last.a!.type, "file")
+  })
+
   test("cleanup", (t, done) => {
     fs.rm(
       "test/holster.on.nested-server",

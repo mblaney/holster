@@ -1,5 +1,6 @@
 import type {HolsterAPI} from "./holster.ts"
 import type {WireOptions} from "./schemas.ts"
+import {obj} from "./utils.ts"
 
 // Backs on(cb, _get, {nested: true}) - see holster.ts. A plain on() only
 // resolves the node it's given; it never re-checks a child whose own
@@ -40,29 +41,38 @@ export function attachNested(
 
   const notify = () => cb(latest === null ? null : {...latest})
 
+  const stopChild = (key: string) => {
+    const {api: childApi, handler} = childListeners.get(key)!
+    childApi.off(handler)
+    childListeners.delete(key)
+  }
+
   const topLevelHandler = (data: unknown) => {
-    if (data === null || typeof data !== "object") {
+    if (!obj.is(data)) {
       latest = data as Record<string, unknown> | null
       notify()
       return
     }
 
-    if (!latest || typeof latest !== "object") latest = {}
+    if (!obj.is(latest)) latest = {}
     const node = data as Record<string, unknown>
     for (const [key, value] of Object.entries(node)) {
       if (key === "_") continue
       latest[key] = value
 
-      if (
-        value !== null &&
-        typeof value === "object" &&
-        !childListeners.has(key)
-      ) {
+      const isObject = obj.is(value)
+      // A child that's removed only has its fields cleared, so its own
+      // listener never sees it go. It's stopped here instead, so a new
+      // value for key gets a listener on its own node.
+      if (!isObject && childListeners.has(key)) stopChild(key)
+      if (isObject && !childListeners.has(key)) {
         const childApi = chain().next(key)
         const handler = (childData: unknown) => {
+          // An update already on its way when this was stopped.
+          if (childListeners.get(key)?.handler !== handler) return
           if (childData === null) {
+            stopChild(key)
             delete latest![key]
-            childListeners.delete(key)
           } else {
             latest![key] = childData
           }
@@ -78,9 +88,7 @@ export function attachNested(
 
     for (const key of [...childListeners.keys()]) {
       if (!(key in node)) {
-        const entry = childListeners.get(key)!
-        entry.api.off(entry.handler)
-        childListeners.delete(key)
+        stopChild(key)
         delete latest[key]
       }
     }

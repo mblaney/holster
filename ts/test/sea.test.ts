@@ -289,6 +289,20 @@ describe("SEA", () => {
     })()
   })
 
+  test("verify with an invalid public key", async () => {
+    const signed = await SEA.sign("hello", await SEA.pair())
+    assert.equal(await SEA.verify(signed!, {pub: "not a key"}), null)
+  })
+
+  test("verify a malformed signature", async () => {
+    const pair = await SEA.pair()
+    const signed = await SEA.sign("hello", pair)
+    assert.equal(
+      await SEA.verify({...signed!, s: "not a signature"}, pair),
+      null,
+    )
+  })
+
   test("verifyTimestamp with an invalid public key", async () => {
     assert.equal(await SEA.verifyTimestamp(1, "AAAA", "not a key"), false)
   })
